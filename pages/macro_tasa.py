@@ -30,9 +30,7 @@ def render_macro_tasa(go_to):
 
     c1, c2 = st.columns([1, 3])
 
-    # ----------------------------
-    # (1) + (2) KPI con coma + "TNA" + fecha último dato
-    # ----------------------------
+    # KPI
     with c1:
         st.markdown(
             f"""
@@ -46,39 +44,61 @@ def render_macro_tasa(go_to):
             unsafe_allow_html=True,
         )
 
-    # ----------------------------
-    # Gráfico
-    # (3) rangeslider
-    # (4) título dinámico
-    # (5) aire a la derecha (1 mes)
-    # (6) eje x en español
-    # ----------------------------
     with c2:
-        inflacion_esp_12m = 20.0  # umbral fijo que pediste
+        # ---- Selector de período (sin mini-gráfico) ----
+        rango = st.radio(
+            "Período",
+            ["6M", "1A", "2A", "5A", "Todo"],
+            horizontal=True,
+            index=2,  # 2A por defecto
+            label_visibility="collapsed",
+        )
+
+        max_real = pd.to_datetime(tasa["Date"].max())
+        if rango == "6M":
+            min_sel = max_real - pd.DateOffset(months=6)
+        elif rango == "1A":
+            min_sel = max_real - pd.DateOffset(years=1)
+        elif rango == "2A":
+            min_sel = max_real - pd.DateOffset(years=2)
+        elif rango == "5A":
+            min_sel = max_real - pd.DateOffset(years=5)
+        else:
+            min_sel = pd.to_datetime(tasa["Date"].min())
+
+        # Aire a la derecha: 1 mes calendario
+        max_sel = max_real + pd.DateOffset(months=1)
+
+        tasa_plot = tasa[tasa["Date"] >= min_sel].copy()
+
+        # ---- Título dinámico ----
+        inflacion_esp_12m = 20.0
         pos = "por encima" if last_val > inflacion_esp_12m else "debajo"
         title_txt = (
-            f"   La tasa se ubica {pos} de la inflación esperada para los próximos 12 meses: "
+            f"La tasa se ubica {pos} de la inflación esperada para los próximos 12 meses: "
             f"{_fmt_pct_es(inflacion_esp_12m, 0)}%"
         )
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=tasa["Date"], y=tasa["value"], name="Tasa", mode="lines"))
+        fig.add_trace(
+            go.Scatter(
+                x=tasa_plot["Date"],
+                y=tasa_plot["value"],
+                name="Tasa",
+                mode="lines",
+            )
+        )
 
-        # (5) un mes libre a la derecha
-        min_date = pd.to_datetime(tasa["Date"].min())
-        max_date = pd.to_datetime(tasa["Date"].max()) + pd.Timedelta(days=31)
-
-        # (6) eje x en español con ticks manuales
+        # Eje X en español (ticks manuales)
         mes_es = {
             1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
-            7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic"
+            7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
         }
 
-        # ticks cada 6 meses para no saturar
-        tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq="6MS")
-        if len(tickvals) < 4:
-            tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq="3MS")
+        min_date = pd.to_datetime(tasa_plot["Date"].min())
+        max_date = max_sel
 
+        tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq="6MS")
         ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
 
         fig.update_layout(
@@ -90,15 +110,13 @@ def render_macro_tasa(go_to):
         )
 
         fig.update_yaxes(title_text="% TNA", ticksuffix="%")
-
         fig.update_xaxes(
             title_text="",
             range=[min_date, max_date],
             tickmode="array",
             tickvals=tickvals,
             ticktext=ticktext,
-            # (3) barra dinámica para zoom/selección
-            rangeslider=dict(visible=True),
+            rangeslider=dict(visible=False),  # <- sin mini gráfico
         )
 
         st.plotly_chart(fig, use_container_width=True)
