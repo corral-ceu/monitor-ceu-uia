@@ -26,11 +26,12 @@ def render_macro_tasa(go_to):
 
     # Último dato
     last_val = float(tasa["value"].iloc[-1])
-    last_date = pd.to_datetime(tasa["Date"].iloc[-1]).date()
+    last_date_ts = pd.to_datetime(tasa["Date"].iloc[-1])
+    last_date = last_date_ts.date()
 
     c1, c2 = st.columns([1, 3])
 
-    # KPI
+    # KPI + descarga
     with c1:
         st.markdown(
             f"""
@@ -38,17 +39,28 @@ def render_macro_tasa(go_to):
                 {_fmt_pct_es(last_val, 1)}% <span style="font-size:18px; font-weight:700;">TNA</span>
             </div>
             <div style="margin-top:8px; color:#6b7280; font-size:14px;">
-                Último dato: {last_date.strftime("%d/%m/%Y")}
+                Último dato: {last_date_ts.strftime("%d/%m/%Y")}
             </div>
             """,
             unsafe_allow_html=True,
         )
 
+        # (4) Descargar CSV debajo del "Último dato"
+        csv_bytes = tasa.rename(columns={"Date": "date", "value": "tna"}).to_csv(index=False).encode("utf-8")
+        file_name = f"tasa_tna_{last_date_ts.strftime('%Y-%m-%d')}.csv"
+        st.download_button(
+            label="⬇️ Descargar CSV",
+            data=csv_bytes,
+            file_name=file_name,
+            mime="text/csv",
+            use_container_width=True,
+        )
+
     with c2:
-        # ---- Selector de período (sin mini-gráfico) ----
+        # Selector de período (sin mini-gráfico)
         rango = st.radio(
             "Período",
-            ["6M", "1A", "2A", "5A", "Todo"],
+            ["6M", "1A", "2A", "Todo"],
             horizontal=True,
             index=2,  # 2A por defecto
             label_visibility="collapsed",
@@ -61,8 +73,6 @@ def render_macro_tasa(go_to):
             min_sel = max_real - pd.DateOffset(years=1)
         elif rango == "2A":
             min_sel = max_real - pd.DateOffset(years=2)
-        elif rango == "5A":
-            min_sel = max_real - pd.DateOffset(years=5)
         else:
             min_sel = pd.to_datetime(tasa["Date"].min())
 
@@ -71,11 +81,11 @@ def render_macro_tasa(go_to):
 
         tasa_plot = tasa[tasa["Date"] >= min_sel].copy()
 
-        # ---- Título dinámico ----
+        # Título dinámico (con espacios al inicio como pediste)
         inflacion_esp_12m = 20.0
         pos = "por encima" if last_val > inflacion_esp_12m else "debajo"
         title_txt = (
-            f"La tasa se ubica {pos} de la inflación esperada para los próximos 12 meses: "
+            f"   La tasa se ubica {pos} de la inflación esperada para los próximos 12 meses: "
             f"{_fmt_pct_es(inflacion_esp_12m, 0)}%"
         )
 
@@ -116,7 +126,15 @@ def render_macro_tasa(go_to):
             tickmode="array",
             tickvals=tickvals,
             ticktext=ticktext,
-            rangeslider=dict(visible=False),  # <- sin mini gráfico
+            rangeslider=dict(visible=False),
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
+        # (1) Fuente debajo del gráfico, en gris similar a ejes
+        st.markdown(
+            "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
+            "Fuente: Banco Central de la República Argentina."
+            "</div>",
+            unsafe_allow_html=True,
+        )
