@@ -91,16 +91,34 @@ def render_macro_fx(go_to):
             unsafe_allow_html=True,
         )
         st.caption(f"Fecha: {last_date.strftime('%d/%m/%Y')}")
+    
+        # % más grandes (como pediste)
+        st.markdown(
+            f"<div style='font-size:18px; margin-top:14px;'><b>% mensual:</b> {safe_pct(vm, 1)}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='font-size:18px; margin-top:8px;'><b>% anual:</b> {safe_pct(va, 1)}</div>",
+            unsafe_allow_html=True,
+        )
+    
+        # espacio antes del botón
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    
+        # Descargar CSV (debajo de todo)
+        fx_csv = fx[["Date", "FX"]].copy()
+        fx_csv = fx_csv.rename(columns={"Date": "date", "FX": "a3500"})
+        csv_bytes = fx_csv.to_csv(index=False).encode("utf-8")
+        file_name = f"a3500_{last_date.strftime('%Y-%m-%d')}.csv"
+    
+        st.download_button(
+            label="⬇️ Descargar CSV",
+            data=csv_bytes,
+            file_name=file_name,
+            mime="text/csv",
+            use_container_width=False,  # más angosto, como en tasa
+        )
 
-        # % más grandes
-        st.markdown(
-            f"<div style='font-size:16px; margin-top:10px;'><b>% mensual:</b> {safe_pct(vm, 1)}</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<div style='font-size:16px; margin-top:6px;'><b>% anual:</b> {safe_pct(va, 1)}</div>",
-            unsafe_allow_html=True,
-        )
 
     with chart_col:
         fig = go.Figure()
@@ -152,7 +170,7 @@ def render_macro_fx(go_to):
         title_txt = ""
         if dist_to_upper is not None:
             title_txt = (
-                f"El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
+                f"   El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
             )
 
         fig.update_layout(
