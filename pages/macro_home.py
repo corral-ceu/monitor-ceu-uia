@@ -1,11 +1,5 @@
 import streamlit as st
 
-
-def render_macro_home(go_to):
-    # Botón volver
-    if st.button("← Volver"):
-        go_to("home")
-
     st.markdown(
         """
         <div class="home-wrap">
