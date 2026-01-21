@@ -141,7 +141,7 @@ def get_rem_last() -> pd.DataFrame:
 
 
 # ============================================================
-# IPC INDEC (se mantiene para macro_precios.py)
+# IPC INDEC (para macro_precios.py)
 # ============================================================
 @st.cache_data(ttl=12 * 60 * 60)
 def get_ipc_indec_full() -> pd.DataFrame:
@@ -151,7 +151,12 @@ def get_ipc_indec_full() -> pd.DataFrame:
     except UnicodeDecodeError:
         df = pd.read_csv(url, sep=";", decimal=",", encoding="latin1")
 
-    df["Codigo"] = pd.to_numeric(df["Codigo"], errors="coerce")
+    # ✅ CLAVE: mantener Codigo como string (preserva B/S/Núcleo/Regulados/Estacional)
+    df["Codigo"] = df["Codigo"].astype(str).str.strip()
+
+    # ✅ versión numérica para filtros tipo Codigo == 0
+    df["Codigo_num"] = pd.to_numeric(df["Codigo"], errors="coerce")
+
     df["Periodo"] = pd.to_datetime(df["Periodo"].astype(str), format="%Y%m", errors="coerce")
 
     for c in ["Descripcion", "Clasificador", "Region"]:
@@ -168,7 +173,7 @@ def get_ipc_nacional_nivel_general() -> pd.DataFrame:
     df = get_ipc_indec_full()
 
     tmp = (
-        df[(df["Codigo"] == 0) & (df["Region"] == "Nacional")]
+        df[(df["Codigo_num"] == 0) & (df["Region"] == "Nacional")]
         .dropna(subset=["v_m_IPC"])
         .rename(columns={"Periodo": "Date"})
         .sort_values("Date")
@@ -182,6 +187,7 @@ def get_ipc_nacional_nivel_general() -> pd.DataFrame:
         .sort_values("Period")
         .reset_index(drop=True)
     )
+
 
 
 # ============================================================
