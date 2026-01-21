@@ -25,12 +25,8 @@ def _is_nivel_general(label: str) -> bool:
     return str(label).strip().lower() == "nivel general"
 
 
-def _code_to_clean_str(x) -> str:
-    """
-    - Si viene '0.0' -> '0'
-    - Si viene '  12 ' -> '12'
-    - Si viene 'Núcleo' -> 'Núcleo'
-    """
+def _clean_code(x) -> str:
+    # limpia floats tipo "0.0" -> "0"
     s = str(x).strip()
     if s.endswith(".0") and s.replace(".0", "").isdigit():
         return s[:-2]
@@ -45,13 +41,11 @@ def render_macro_precios(go_to):
     st.caption("Tasa de inflación – % Nacional")
     st.divider()
 
-    # --- CSS selector (más grande + contraste) ---
+    # --- CSS: selector más grande y legible ---
     st.markdown(
         """
         <style>
-        div[data-baseweb="select"]{
-            max-width: 720px;
-        }
+        div[data-baseweb="select"]{ max-width: 720px; }
         div[data-baseweb="select"] > div{
             background: rgba(17,24,39,0.94);
             border: 1px solid rgba(255,255,255,0.18);
@@ -80,7 +74,7 @@ def render_macro_precios(go_to):
     )
 
     # =========================
-    # Datos
+    # Datos (Nacional fijo)
     # =========================
     ipc = get_ipc_indec_full()
     ipc = ipc[ipc["Region"] == "Nacional"].copy()
@@ -88,45 +82,52 @@ def render_macro_precios(go_to):
         st.warning("Sin datos IPC.")
         return
 
-    ipc["Codigo_str"] = ipc["Codigo"].apply(_code_to_clean_str)
+    ipc["Codigo_str"] = ipc["Codigo"].apply(_clean_code).astype(str).str.strip()
     ipc["Descripcion"] = ipc["Descripcion"].astype(str).str.strip()
     ipc["Periodo"] = pd.to_datetime(ipc["Periodo"], errors="coerce")
     ipc = ipc.dropna(subset=["Periodo"]).sort_values("Periodo")
 
     # =========================
-    # Selector: criterio que pediste
-    # - Si Codigo es 0..12 => label = Descripcion
-    # - Si no => label = Codigo (B/S con mapping)
+    # Selector DF (NUEVO) con tu regla:
+    # - si Descripcion vacía -> usar Codigo
+    # - B/S con mapping
     # =========================
     label_fix = {"B": "Bienes", "S": "Servicios"}
 
-    sel_rows = (
+    sel = (
         ipc[["Codigo_str", "Descripcion"]]
         .drop_duplicates()
         .copy()
     )
 
+    def _is_empty_desc(d: str) -> bool:
+        ds = str(d).strip().lower()
+        return (ds == "") or (ds == "nan") or (ds == "none")
+
     def build_label(code: str, desc: str) -> str:
-        # fuerza código 0 como Nivel general (por si desc viene raro)
+        code = str(code).strip()
+
+        # fuerza 0 como Nivel general (por las dudas)
         if code.isdigit() and int(code) == 0:
             return "Nivel general"
 
-        if code.isdigit() and 0 <= int(code) <= 12:
-            return desc
+        # si hay descripción válida, usarla
+        if not _is_empty_desc(desc):
+            return str(desc).strip()
 
-        # resto
+        # si descripción vacía, usar el código (con fix B/S)
         if code in label_fix:
             return label_fix[code]
         return code
 
-    sel_rows["Label"] = sel_rows.apply(lambda r: build_label(r["Codigo_str"], r["Descripcion"]), axis=1)
+    sel["Label"] = sel.apply(lambda r: build_label(r["Codigo_str"], r["Descripcion"]), axis=1)
 
-    # ordenar: Nivel general primero, luego alfabético
-    sel_rows["ord0"] = sel_rows["Label"].apply(lambda x: 0 if _is_nivel_general(x) else 1)
-    sel_rows = sel_rows.sort_values(["ord0", "Label"]).drop(columns=["ord0"])
+    # ordenar: Nivel general primero
+    sel["ord0"] = sel["Label"].apply(lambda x: 0 if _is_nivel_general(x) else 1)
+    sel = sel.sort_values(["ord0", "Label"]).drop(columns=["ord0"])
 
-    options = sel_rows["Codigo_str"].tolist()
-    code_to_label = dict(zip(sel_rows["Codigo_str"], sel_rows["Label"]))
+    options = sel["Codigo_str"].tolist()
+    code_to_label = dict(zip(sel["Codigo_str"], sel["Label"]))
 
     # default: Nivel general
     default_code = None
@@ -137,13 +138,13 @@ def render_macro_precios(go_to):
     if default_code is None and options:
         default_code = options[0]
 
-    selected_codes = st.multiselect(
+    selected = st.multiselect(
         "Seleccioná una o más divisiones",
         options=options,
         default=[default_code] if default_code else [],
         format_func=lambda c: code_to_label.get(c, c),
     )
-    if not selected_codes:
+    if not selected:
         st.info("Seleccioná al menos una división.")
         return
 
@@ -169,16 +170,12 @@ def render_macro_precios(go_to):
         kpi_suffix = "anual"
 
     # =========================
-    # Serie base: primera selección
+    # Serie base (primera seleccionada)
     # =========================
-    base_code = selected_codes[0]
+    base_code = selected[0]
     base_label = code_to_label.get(base_code, base_code)
 
-    base = (
-        ipc[ipc["Codigo_str"] == base_code]
-        .dropna(subset=[y_col])
-        .sort_values("Periodo")
-    )
+    base = ipc[ipc["Codigo_str"] == base_code].dropna(subset=[y_col]).sort_values("Periodo")
     if base.empty:
         st.warning("Sin datos para esa selección/frecuencia.")
         return
@@ -207,9 +204,7 @@ def render_macro_precios(go_to):
             unsafe_allow_html=True,
         )
 
-        # CSV de seleccionados
-        out = ipc[ipc["Codigo_str"].isin(selected_codes)].copy()
-        out = out.sort_values(["Codigo_str", "Periodo"])
+        out = ipc[ipc["Codigo_str"].isin(selected)].sort_values(["Codigo_str", "Periodo"])
         csv = out.to_csv(index=False, sep=";", decimal=",").encode("utf-8")
         st.download_button(
             "⬇️ Descargar CSV",
@@ -244,8 +239,8 @@ def render_macro_precios(go_to):
             tick_freq = "6MS"
         max_sel = max_real + pd.DateOffset(months=1)
 
-        # autoescala Y en el rango
-        tmp = ipc[ipc["Codigo_str"].isin(selected_codes)].dropna(subset=[y_col]).copy()
+        # Autoescala Y (por rango + selecciones)
+        tmp = ipc[ipc["Codigo_str"].isin(selected)].dropna(subset=[y_col]).copy()
         tmp = tmp[(tmp["Periodo"] >= min_sel) & (tmp["Periodo"] <= max_real)]
         if tmp.empty:
             st.warning("No hay datos en el período seleccionado.")
@@ -267,7 +262,7 @@ def render_macro_precios(go_to):
         )
 
         fig = go.Figure()
-        for c in selected_codes:
+        for c in selected:
             s = ipc[ipc["Codigo_str"] == c].dropna(subset=[y_col]).copy()
             s = s[(s["Periodo"] >= min_sel) & (s["Periodo"] <= max_real)].sort_values("Periodo")
             if s.empty:
@@ -288,9 +283,9 @@ def render_macro_precios(go_to):
             height=520,
             margin=dict(l=10, r=20, t=60, b=70),
             title=dict(text=title_txt, x=0, xanchor="left"),
-            showlegend=len(selected_codes) > 1,
+            showlegend=len(selected) > 1,
         )
-        if len(selected_codes) > 1:
+        if len(selected) > 1:
             fig.update_layout(
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0)
             )
