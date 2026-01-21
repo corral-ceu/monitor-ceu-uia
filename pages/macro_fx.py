@@ -284,21 +284,14 @@ def render_macro_fx(go_to):
     series_all = sorted(tcr_long["Serie"].dropna().unique().tolist())
 
     default_sel = ["ITCRM"] if "ITCRM" in series_all else ([series_all[0]] if series_all else [])
-
+    
     # -------------------------
     # Selector de series (1 fila – 4 columnas)
     # -------------------------
     st.markdown("**Seleccionar series**")
     
-    series_focus = [
-        "ITCRM ",
-        "ITCRB Brasil",
-        "ITCRB Estados Unidos",
-        "ITCRB China",
-    ]
-    
-    # Filtrar por si alguna no existiera en el Excel
-    series_focus = [s for s in series_focus if s in series_all]
+    # Usamos los nombres EXACTOS del Excel (incluido el espacio en ITCRM )
+    series_focus = ["ITCRM ", "ITCRB Brasil", "ITCRB Estados Unidos", "ITCRB China"]
     
     cols = st.columns(4)
     sel_series = []
@@ -307,21 +300,14 @@ def render_macro_fx(go_to):
         with col:
             if st.checkbox(
                 s,
-                value=(s in default_sel),
+                value=(s == "ITCRM "),  # default ITCRM (con espacio)
                 key=f"itcrm_cb_{s}"
             ):
                 sel_series.append(s)
-
+    
     if not sel_series:
         st.info("Seleccioná al menos una serie para ver el gráfico.")
         return
-
-    if st.checkbox(
-    s,
-    value=(s == "ITCRM"),   # ← ITCRM por default
-    key=f"itcrm_cb_{s}"
-):
-    sel_series.append(s)
 
 
     # -------------------------
