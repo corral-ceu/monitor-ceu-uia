@@ -91,8 +91,8 @@ def render_macro_tasa(go_to):
     )
 
     SERIES_TASAS = {
-        13: {"nombre": "Adelantos"},
-        12: {"nombre": "Depósitos"},
+        13: {"nombre": "Adelantos a c/c de Empresas"},
+        12: {"nombre": "Plazo Fijo"},
         14: {"nombre": "Préstamos Personales"},
     }
 
