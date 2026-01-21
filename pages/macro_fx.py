@@ -6,10 +6,12 @@ import numpy as np
 from services.macro_data import (
     build_bands_2025,
     build_bands_2026,
-    get_a3500,       # Monetarias/5
-    get_ipc_bcra,    # Monetarias/27 en decimal
+    get_a3500,
+    get_ipc_bcra,
     get_rem_last,
+    get_itcrm_excel_long,  # <-- AGREGAR
 )
+
 from ui.common import safe_pct
 
 
