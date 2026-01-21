@@ -286,32 +286,22 @@ def render_macro_fx(go_to):
     default_sel = ["ITCRM"] if "ITCRM" in series_all else ([series_all[0]] if series_all else [])
 
     # -------------------------
-    # Selector de series (fix legibilidad)
+    # Selector de series (checkboxes – legible)
     # -------------------------
     st.markdown("**Seleccionar series**")
+    
+    sel_series = []
+    cols = st.columns(3)
+    
+    for i, s in enumerate(series_all):
+        with cols[i % 3]:
+            if st.checkbox(
+                s,
+                value=(s in default_sel),
+                key=f"itcrm_cb_{s}"
+            ):
+                sel_series.append(s)
 
-    st.markdown(
-        """
-        <style>
-          div[data-testid="stMultiSelect"] span {
-            color: #111827 !important;
-          }
-          div[data-testid="stMultiSelect"] div[role="button"] {
-            background: rgba(17,24,39,0.06) !important;
-            border: 1px solid rgba(17,24,39,0.15) !important;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    sel_series = st.multiselect(
-        label="",
-        options=series_all,
-        default=default_sel,
-        key="itcrm_series_sel",
-        label_visibility="collapsed",
-    )
 
     if not sel_series:
         st.info("Seleccioná al menos una serie para ver el gráfico.")
