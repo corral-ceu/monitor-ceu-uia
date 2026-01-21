@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 from services.macro_data import (
     build_bands_2025,
     build_bands_2026,
-    get_a3500,
-    get_ipc_bcra,
+    get_a3500,       # Monetarias/5
+    get_ipc_bcra,    # Monetarias/27 en decimal
     get_rem_last,
 )
 from ui.common import safe_pct
@@ -28,18 +28,22 @@ def render_macro_fx(go_to):
         r = t.iloc[-1]
         return float(r["FX"]), pd.to_datetime(r["Date"])
 
+    # =========================
+    # Carga datos
+    # =========================
     with st.spinner("Cargando datos..."):
-        fx = get_a3500()      # Monetarias/5
+        fx = get_a3500()          # id=5
         rem = get_rem_last()
-        ipc = get_ipc_bcra()  # Monetarias/27 en decimal
+        ipc = get_ipc_bcra()      # id=27, % mensual en decimal
 
-        # Bandas (solo desde 2025-04-14 en adelante)
         bands_2025 = build_bands_2025("2025-04-14", "2025-12-31", 1000.0, 1400.0)
         bands_2026 = build_bands_2026(bands_2025, rem, ipc)
+
         bands = (
             pd.concat([bands_2025, bands_2026], ignore_index=True)
             .dropna(subset=["Date", "lower", "upper"])
             .sort_values("Date")
+            .reset_index(drop=True)
         )
 
         fx = fx.copy()
@@ -56,38 +60,52 @@ def render_macro_fx(go_to):
         st.warning("Sin datos del tipo de cambio.")
         return
 
-    # Último dato (TC)
+    # =========================
+    # KPIs
+    # =========================
     last_date = pd.to_datetime(fx["Date"].iloc[-1])
     last_fx = float(fx["FX"].iloc[-1])
 
     fx_m, _ = asof_fx(fx, last_date - pd.Timedelta(days=30))
     fx_y, _ = asof_fx(fx, last_date - pd.Timedelta(days=365))
+
     vm = None if fx_m is None else (last_fx / fx_m - 1) * 100
     va = None if fx_y is None else (last_fx / fx_y - 1) * 100
 
     # =========================
-    # Armamos DF “histórico” diario desde el inicio del TC
-    # (bandas quedan NaN antes de 2025-04-14)
+    # DF diario histórico (para TODO real)
     # =========================
     fx_min = pd.to_datetime(fx["Date"].min())
     bands_max = pd.to_datetime(bands["Date"].max()) if not bands.empty else last_date
     full_end = max(last_date, bands_max)
 
     cal = pd.DataFrame({"Date": pd.date_range(fx_min, full_end, freq="D")})
+
     df = (
         cal.merge(fx, on="Date", how="left")
            .merge(bands, on="Date", how="left")
            .sort_values("Date")
+           .reset_index(drop=True)
     )
 
-    # Distancia a banda superior (en la última fecha si existe upper)
+    # TC sin huecos: forward-fill (usa último dato disponible)
+    df["FX"] = df["FX"].ffill()
+
+    # Distancia a banda superior (solo si hay banda en last_date)
     up_row = df.loc[df["Date"] == last_date, "upper"]
     upper_last = float(up_row.iloc[0]) if (not up_row.empty and pd.notna(up_row.iloc[0])) else None
+
     dist_to_upper = None
     if upper_last is not None and last_fx > 0:
         dist_to_upper = (upper_last / last_fx - 1) * 100
 
-    # ---- Layout KPI + gráfico ----
+    title_txt = ""
+    if dist_to_upper is not None:
+        title_txt = f"   El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
+
+    # =========================
+    # Layout KPI + gráfico
+    # =========================
     kpi_col, chart_col = st.columns([1, 3], vertical_alignment="top")
 
     with kpi_col:
@@ -113,7 +131,7 @@ def render_macro_fx(go_to):
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # Descargar CSV (TC + bandas)
+        # CSV con TC + bandas
         export = df[["Date", "FX", "lower", "upper"]].copy()
         export = export.rename(
             columns={
@@ -135,22 +153,13 @@ def render_macro_fx(go_to):
         )
 
     with chart_col:
-        # =========================
-        # Selector de rango (mismo “look” radio con puntito)
-        # Default = 1A
-        # =========================
-        rango_map = {
-            "6M": 180,
-            "1A": 365,
-            "2A": 365 * 2,
-            "5A": 365 * 5,
-            "TODO": None,
-        }
+        # Selector rango (default 1A)
+        rango_map = {"6M": 180, "1A": 365, "2A": 365 * 2, "5A": 365 * 5, "TODO": None}
 
         rango = st.radio(
             label="",
             options=list(rango_map.keys()),
-            index=1,               # 1A por defecto
+            index=1,  # 1A por defecto
             horizontal=True,
             label_visibility="collapsed",
             key="fx_rango",
@@ -164,15 +173,12 @@ def render_macro_fx(go_to):
 
         df_plot = df[df["Date"] >= min_date].copy()
 
-        # 1) TC sin vacíos: forward-fill sobre calendario diario
-        # (si un día no hay dato, usa el último disponible)
-        df_plot["FX"] = df_plot["FX"].ffill()
-
         # aire a la derecha
         max_date = pd.to_datetime(df["Date"].max()) + pd.DateOffset(months=1)
 
         fig = go.Figure()
 
+        # Bandas
         fig.add_trace(
             go.Scatter(
                 x=df_plot["Date"],
@@ -194,7 +200,7 @@ def render_macro_fx(go_to):
             )
         )
 
-        # TC (ya sin huecos)
+        # TC
         fig.add_trace(
             go.Scatter(
                 x=df_plot["Date"],
@@ -206,13 +212,13 @@ def render_macro_fx(go_to):
             )
         )
 
-        # ---- Eje X en español (ticks manuales) ----
+        # ticks en español
         mes_es = {
             1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
             7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
         }
 
-        # 2) Si es TODO, etiquetas cada 6 meses (si no, cada 2 meses como antes)
+        # En TODO: etiquetas cada 6 meses; resto cada 2 meses
         tick_freq = "6MS" if rango == "TODO" else "2MS"
         tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq=tick_freq)
         ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
@@ -222,6 +228,7 @@ def render_macro_fx(go_to):
             height=600,
             margin=dict(l=10, r=10, t=90, b=60),
             showlegend=True,
+            title=dict(text=title_txt, x=0, xanchor="left"),
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
@@ -230,7 +237,6 @@ def render_macro_fx(go_to):
                 x=1.0,
                 font=dict(size=12),
             ),
-            title=dict(text=title_txt, x=0, xanchor="left"),
         )
 
         fig.update_xaxes(
@@ -243,7 +249,6 @@ def render_macro_fx(go_to):
         fig.update_yaxes(title_text="")
 
         st.plotly_chart(fig, use_container_width=True)
-
 
         st.markdown(
             "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
