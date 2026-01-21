@@ -164,12 +164,15 @@ def render_macro_fx(go_to):
 
         df_plot = df[df["Date"] >= min_date].copy()
 
+        # 1) TC sin vacíos: forward-fill sobre calendario diario
+        # (si un día no hay dato, usa el último disponible)
+        df_plot["FX"] = df_plot["FX"].ffill()
+
         # aire a la derecha
         max_date = pd.to_datetime(df["Date"].max()) + pd.DateOffset(months=1)
 
         fig = go.Figure()
 
-        # Bandas (pueden ser NaN antes de 2025-04-14; Plotly las “corta”)
         fig.add_trace(
             go.Scatter(
                 x=df_plot["Date"],
@@ -191,36 +194,34 @@ def render_macro_fx(go_to):
             )
         )
 
-        # TC
+        # TC (ya sin huecos)
         fig.add_trace(
             go.Scatter(
                 x=df_plot["Date"],
                 y=df_plot["FX"],
                 name="TC mayorista",
                 mode="lines",
-                connectgaps=False,
+                connectgaps=True,
                 hovertemplate="%{x|%d/%m/%Y}<br>TC mayorista: %{y:.2f}<extra></extra>",
             )
         )
 
-        # ticks en español
+        # ---- Eje X en español (ticks manuales) ----
         mes_es = {
             1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
             7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
         }
-        tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq="2MS")
-        ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
 
-        title_txt = ""
-        if dist_to_upper is not None:
-            title_txt = f"   El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
+        # 2) Si es TODO, etiquetas cada 6 meses (si no, cada 2 meses como antes)
+        tick_freq = "6MS" if rango == "TODO" else "2MS"
+        tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq=tick_freq)
+        ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
 
         fig.update_layout(
             hovermode="x",
             height=600,
             margin=dict(l=10, r=10, t=90, b=60),
             showlegend=True,
-            # leyenda arriba a la derecha
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
@@ -242,6 +243,7 @@ def render_macro_fx(go_to):
         fig.update_yaxes(title_text="")
 
         st.plotly_chart(fig, use_container_width=True)
+
 
         st.markdown(
             "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
