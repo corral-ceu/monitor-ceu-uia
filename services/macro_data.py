@@ -9,50 +9,25 @@ import streamlit as st
 # ============================================================
 @st.cache_data(ttl=60 * 60)
 def get_a3500() -> pd.DataFrame:
-    url = "https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias/5"
-    params = {"Limit": 1000, "Offset": 0}
-    data = []
-
-    for _ in range(3):
-        try:
-            while True:
-                r = requests.get(url, params=params, timeout=10, verify=False)
-                r.raise_for_status()
-                payload = r.json()
-
-                results = payload.get("results", [])
-                if not results:
-                    break
-
-                detalle = results[0].get("detalle", [])
-                if not detalle:
-                    break
-
-                data.extend(detalle)
-
-                meta = payload["metadata"]["resultset"]
-                params["Offset"] += params["Limit"]
-                if params["Offset"] >= meta["count"]:
-                    break
-            break
-        except requests.exceptions.RequestException:
-            pass
-
-    if not data:
+    """
+    Wrapper del id=5 usando el helper genérico paginado.
+    Devuelve columnas: Date, FX
+    """
+    df = get_monetaria_serie(5)  # <- usa tu función paginada robusta
+    if df is None or df.empty:
         return pd.DataFrame(columns=["Date", "FX"])
 
-    df = pd.DataFrame(data)
-    df["Date"] = pd.to_datetime(df["fecha"], errors="coerce")
-    df["FX"] = pd.to_numeric(df["valor"], errors="coerce")
+    out = df.rename(columns={"value": "FX"}).copy()
+    out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+    out["FX"] = pd.to_numeric(out["FX"], errors="coerce")
 
     return (
-        df[["Date", "FX"]]
+        out[["Date", "FX"]]
         .dropna()
         .drop_duplicates(subset=["Date"])
         .sort_values("Date")
         .reset_index(drop=True)
     )
-
 
 # ============================================================
 # REM
