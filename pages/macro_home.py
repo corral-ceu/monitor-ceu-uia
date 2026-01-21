@@ -2,6 +2,10 @@ import streamlit as st
 
 
 def render_macro_home(go_to):
+    # Botón volver
+    if st.button("← Volver"):
+        go_to("home")
+
     st.markdown(
         """
         <div class="home-wrap">
@@ -28,10 +32,3 @@ def render_macro_home(go_to):
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
-
-        logo_col = st.columns([2, 1, 2])
-        with logo_col[1]:
-            try:
-                st.image("assets/logo_ceu.png")
-            except Exception:
-                st.markdown("### CEU - UIA")
