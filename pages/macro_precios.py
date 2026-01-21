@@ -308,127 +308,127 @@ def render_macro_precios(go_to):
         st.plotly_chart(fig, use_container_width=True)
         st.caption("Fuente: INDEC")
 
-
-# ============================================================
-# CUADRO – Variaciones mensuales por año (IPC Nacional)
-# ============================================================
-st.markdown("### 📋 Variaciones mensuales por año")
-st.caption("Variación mensual del IPC (%). Cobertura nacional – INDEC")
-
-# ----------------------------
-# Dataset base (mensual)
-# ----------------------------
-tab = ipc.dropna(subset=["Periodo", "v_m_IPC"]).copy()
-tab["Year"] = tab["Periodo"].dt.year
-tab["Month"] = tab["Periodo"].dt.month
-
-# ----------------------------
-# Selector de año (completo)
-# ----------------------------
-years = sorted(tab["Year"].dropna().unique(), reverse=True)
-if not years:
-    st.info("No hay datos suficientes para armar la tabla.")
-else:
-    selected_year = st.selectbox(
-        "Seleccioná el año",
-        years,
-        index=0,
-        key="ipc_year_table",
-    )
-
-    tab = tab[tab["Year"] == selected_year].copy()
-
+    
+    # ============================================================
+    # CUADRO – Variaciones mensuales por año (IPC Nacional)
+    # ============================================================
+    st.markdown("### 📋 Variaciones mensuales por año")
+    st.caption("Variación mensual del IPC (%). Cobertura nacional – INDEC")
+    
     # ----------------------------
-    # Label unificado (misma lógica del selector)
+    # Dataset base (mensual)
     # ----------------------------
-    label_fix = {"B": "Bienes", "S": "Servicios"}
-
-    def _is_empty_desc(d):
-        d = str(d).strip().lower()
-        return d in ["", "nan", "none"]
-
-    def build_label(code, desc):
-        code = str(code).strip()
-
-        if code.isdigit() and int(code) == 0:
-            return "Nivel general"
-
-        if not _is_empty_desc(desc):
-            return desc
-
-        if code in label_fix:
-            return label_fix[code]
-
-        return code
-
-    tab["Label"] = tab.apply(
-        lambda r: build_label(r["Codigo_str"], r["Descripcion"]),
-        axis=1
-    )
-
+    tab = ipc.dropna(subset=["Periodo", "v_m_IPC"]).copy()
+    tab["Year"] = tab["Periodo"].dt.year
+    tab["Month"] = tab["Periodo"].dt.month
+    
     # ----------------------------
-    # Pivot mensual (ene–dic)
+    # Selector de año (completo)
     # ----------------------------
-    piv = (
-        tab.pivot_table(
-            index="Label",
-            columns="Month",
-            values="v_m_IPC",
-            aggfunc="last",
+    years = sorted(tab["Year"].dropna().unique(), reverse=True)
+    if not years:
+        st.info("No hay datos suficientes para armar la tabla.")
+    else:
+        selected_year = st.selectbox(
+            "Seleccioná el año",
+            years,
+            index=0,
+            key="ipc_year_table",
         )
-        .reindex(columns=range(1, 13))
-    )
-
-    month_map = {
-        1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
-        7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic"
-    }
-    piv.columns = [month_map[m] for m in piv.columns]
-
-    # ----------------------------
-    # Orden de filas
-    # ----------------------------
-    categorias = {"Bienes", "Servicios", "Núcleo", "Regulados", "Estacional"}
-
-    def sort_key(x):
-        if x.lower() == "nivel general":
-            return (0, x)
-        if x in categorias:
-            return (1, x)
-        return (2, x)
-
-    piv = piv.loc[sorted(piv.index, key=sort_key)]
-
-    # ----------------------------
-    # Formato %
-    # ----------------------------
-    def fmt(v):
-        if pd.isna(v):
-            return "-"
-        return f"{v:.1f}%".replace(".", ",")
-
-    piv_fmt = piv.applymap(fmt)
-
-    # ----------------------------
-    # Estilo visual
-    # ----------------------------
-    def style_rows(df):
-        styles = []
-        for idx in df.index:
-            if idx.lower() == "nivel general":
-                styles.append(
-                    ["font-weight:800; background-color:rgba(17,24,39,0.06)"] * df.shape[1]
-                )
-            elif idx in categorias:
-                styles.append(
-                    ["font-weight:800; background-color:rgba(17,24,39,0.10)"] * df.shape[1]
-                )
-            else:
-                styles.append([""] * df.shape[1])
-        return pd.DataFrame(styles, index=df.index, columns=df.columns)
-
-    st.dataframe(
-        piv_fmt.style.apply(style_rows, axis=None),
-        use_container_width=True,
-        height=520,
-    )
+    
+        tab = tab[tab["Year"] == selected_year].copy()
+    
+        # ----------------------------
+        # Label unificado (misma lógica del selector)
+        # ----------------------------
+        label_fix = {"B": "Bienes", "S": "Servicios"}
+    
+        def _is_empty_desc(d):
+            d = str(d).strip().lower()
+            return d in ["", "nan", "none"]
+    
+        def build_label(code, desc):
+            code = str(code).strip()
+    
+            if code.isdigit() and int(code) == 0:
+                return "Nivel general"
+    
+            if not _is_empty_desc(desc):
+                return desc
+    
+            if code in label_fix:
+                return label_fix[code]
+    
+            return code
+    
+        tab["Label"] = tab.apply(
+            lambda r: build_label(r["Codigo_str"], r["Descripcion"]),
+            axis=1
+        )
+    
+        # ----------------------------
+        # Pivot mensual (ene–dic)
+        # ----------------------------
+        piv = (
+            tab.pivot_table(
+                index="Label",
+                columns="Month",
+                values="v_m_IPC",
+                aggfunc="last",
+            )
+            .reindex(columns=range(1, 13))
+        )
+    
+        month_map = {
+            1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
+            7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic"
+        }
+        piv.columns = [month_map[m] for m in piv.columns]
+    
+        # ----------------------------
+        # Orden de filas
+        # ----------------------------
+        categorias = {"Bienes", "Servicios", "Núcleo", "Regulados", "Estacional"}
+    
+        def sort_key(x):
+            if x.lower() == "nivel general":
+                return (0, x)
+            if x in categorias:
+                return (1, x)
+            return (2, x)
+    
+        piv = piv.loc[sorted(piv.index, key=sort_key)]
+    
+        # ----------------------------
+        # Formato %
+        # ----------------------------
+        def fmt(v):
+            if pd.isna(v):
+                return "-"
+            return f"{v:.1f}%".replace(".", ",")
+    
+        piv_fmt = piv.applymap(fmt)
+    
+        # ----------------------------
+        # Estilo visual
+        # ----------------------------
+        def style_rows(df):
+            styles = []
+            for idx in df.index:
+                if idx.lower() == "nivel general":
+                    styles.append(
+                        ["font-weight:800; background-color:rgba(17,24,39,0.06)"] * df.shape[1]
+                    )
+                elif idx in categorias:
+                    styles.append(
+                        ["font-weight:800; background-color:rgba(17,24,39,0.10)"] * df.shape[1]
+                    )
+                else:
+                    styles.append([""] * df.shape[1])
+            return pd.DataFrame(styles, index=df.index, columns=df.columns)
+    
+        st.dataframe(
+            piv_fmt.style.apply(style_rows, axis=None),
+            use_container_width=True,
+            height=520,
+        )
