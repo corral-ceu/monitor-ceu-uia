@@ -29,9 +29,9 @@ def render_macro_fx(go_to):
         return float(r["FX"]), pd.to_datetime(r["Date"])
 
     with st.spinner("Cargando datos..."):
-        fx = get_a3500()          # hoy apunta a Monetarias/5
+        fx = get_a3500()      # Monetarias/5
         rem = get_rem_last()
-        ipc = get_ipc_bcra()      # IPC BCRA id=27, ya en decimal
+        ipc = get_ipc_bcra()  # Monetarias/27 en decimal
 
         bands_2025 = build_bands_2025("2025-04-14", "2025-12-31", 1000.0, 1400.0)
         bands_2026 = build_bands_2026(bands_2025, rem, ipc)
@@ -107,7 +107,6 @@ def render_macro_fx(go_to):
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
-        # Descargar CSV
         fx_csv = fx[["Date", "FX"]].copy()
         fx_csv = fx_csv.rename(columns={"Date": "date", "FX": "tc_mayorista_ref"})
         csv_bytes = fx_csv.to_csv(index=False).encode("utf-8")
@@ -155,10 +154,51 @@ def render_macro_fx(go_to):
             )
         )
 
-        # ---- Eje X en español (ticks manuales) ----
         mes_es = {
             1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
             7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
         }
 
         min_date = start_date_plot
+        max_date = bands_end + pd.DateOffset(months=1)
+
+        tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq="2MS")
+        ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
+
+        title_txt = ""
+        if dist_to_upper is not None:
+            title_txt = f"   El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
+
+        fig.update_layout(
+            hovermode="x",
+            height=600,
+            margin=dict(l=10, r=10, t=90, b=60),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="left",
+                x=0,
+                font=dict(size=12),
+            ),
+            title=dict(text=title_txt, x=0, xanchor="left"),
+        )
+
+        fig.update_xaxes(
+            title_text="",
+            range=[min_date, max_date],
+            tickmode="array",
+            tickvals=tickvals,
+            ticktext=ticktext,
+        )
+        fig.update_yaxes(title_text="")
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown(
+            "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
+            "Fuente: Banco Central de la República Argentina."
+            "</div>",
+            unsafe_allow_html=True,
+        )
