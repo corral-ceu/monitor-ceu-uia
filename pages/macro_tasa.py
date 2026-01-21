@@ -27,18 +27,21 @@ def _rem29_to_daily(df_m: pd.DataFrame) -> pd.DataFrame:
 
     cal = pd.DataFrame({"Date": pd.date_range(start, end, freq="D")})
     cal["Period"] = cal["Date"].dt.to_period("M")
+
     out = cal.merge(df_m[["Period", "value"]], on="Period", how="left").drop(columns=["Period"])
     return out
 
 
 def _title_line(nombre: str, tasa_val: float, infl_val: float) -> str:
     pos = "por encima" if tasa_val > infl_val else "por debajo"
+
     if nombre == "Adelantos":
         desc = "adelantos en cuenta corriente"
     elif nombre == "Préstamos Personales":
         desc = "préstamos personales"
     else:
         desc = "plazo fijo"
+
     return (
         f"<b>{nombre}:</b> La tasa de {desc} ({_fmt_pct_es(tasa_val, 1)}%) "
         f"se encuentra {pos} de la inflación esperada ({_fmt_pct_es(infl_val, 1)}%)"
@@ -57,27 +60,27 @@ def render_macro_tasa(go_to):
     st.markdown(
         """
         <style>
-          /* Contenedor del widget (evita que se estire demasiado) */
+          /* ancho max del selector */
           div[data-testid="stMultiSelect"] { max-width: 420px; }
 
-          /* Caja del input */
+          /* caja del input */
           div[data-testid="stMultiSelect"] div[class*="control"] {
             background: #ffffff !important;
             border-color: #cbd5e1 !important;
           }
 
-          /* Texto dentro del input */
+          /* texto general del multiselect */
           div[data-testid="stMultiSelect"] * {
             color: #0f172a !important;
           }
 
-          /* Chips (seleccionados) */
+          /* chips seleccionados */
           div[data-testid="stMultiSelect"] span[data-baseweb="tag"] {
             background-color: #e2e8f0 !important;
             border: 1px solid #cbd5e1 !important;
           }
 
-          /* Texto dentro del chip */
+          /* texto dentro del chip */
           div[data-testid="stMultiSelect"] span[data-baseweb="tag"] span {
             color: #0f172a !important;
             font-weight: 600 !important;
@@ -99,7 +102,7 @@ def render_macro_tasa(go_to):
         sel_ids = st.multiselect(
             "Tasas",
             options=[13, 12, 14],
-            default=[13, 12],
+            default=[13, 14],
             format_func=lambda k: SERIES_TASAS[k]["nombre"],
             label_visibility="collapsed",
         )
@@ -136,6 +139,7 @@ def render_macro_tasa(go_to):
 
     c1, c2 = st.columns([1, 3])
 
+    # ---------- KPI + CSV ----------
     with c1:
         st.markdown(
             f"""
@@ -149,4 +153,129 @@ def render_macro_tasa(go_to):
             unsafe_allow_html=True,
         )
 
-        # CSV largo
+        # CSV largo: date, serie, value
+        long_parts = []
+        for sid, df in series_data.items():
+            tmp = df.rename(columns={"Date": "date", "value": "value"}).copy()
+            tmp["serie"] = SERIES_TASAS[sid]["nombre"]
+            long_parts.append(tmp[["date", "serie", "value"]])
+        out = pd.concat(long_parts, ignore_index=True).sort_values(["serie", "date"])
+
+        csv_bytes = out.to_csv(index=False).encode("utf-8")
+        file_name = f"tasas_tna_{last_date_ts.strftime('%Y-%m-%d')}.csv"
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.download_button(
+            label="⬇️ Descargar CSV",
+            data=csv_bytes,
+            file_name=file_name,
+            mime="text/csv",
+            use_container_width=False,
+        )
+
+    # ---------- Controles + Gráfico ----------
+    with c2:
+        rango = st.radio(
+            "Período",
+            ["6M", "1A", "2A", "5A", "Todo"],
+            horizontal=True,
+            index=2,
+            label_visibility="collapsed",
+        )
+
+        show_infl_line = st.checkbox("Mostrar inflación esperada (REM) en el gráfico", value=False)
+
+        max_real = max(pd.to_datetime(df["Date"].max()) for df in series_data.values())
+
+        if rango == "6M":
+            min_sel = max_real - pd.DateOffset(months=6)
+        elif rango == "1A":
+            min_sel = max_real - pd.DateOffset(years=1)
+        elif rango == "2A":
+            min_sel = max_real - pd.DateOffset(years=2)
+        elif rango == "5A":
+            min_sel = max_real - pd.DateOffset(years=5)
+        else:
+            # por ahora, lo que haya en datos (después arreglamos lo de 2022 con paginación)
+            min_sel = min(pd.to_datetime(df["Date"].min()) for df in series_data.values())
+
+        max_sel = max_real + pd.DateOffset(months=1)
+
+        # Texto explicativo arriba del gráfico (sin pisarse con leyenda)
+        title_lines = []
+        for sid in sel_ids:
+            df = series_data.get(sid)
+            if df is None or df.empty:
+                continue
+            tasa_last = float(df["value"].iloc[-1])
+            title_lines.append(_title_line(SERIES_TASAS[sid]["nombre"], tasa_last, inflacion_esp_12m))
+
+        st.markdown(
+            "<div style='margin-top:8px; margin-bottom:6px; font-size:14px; line-height:1.35; color:#0f172a;'>"
+            + "<br>".join(title_lines)
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+        fig = go.Figure()
+
+        for sid in sel_ids:
+            df = series_data.get(sid)
+            if df is None or df.empty:
+                continue
+            df_plot = df[df["Date"] >= min_sel].copy()
+            fig.add_trace(
+                go.Scatter(
+                    x=df_plot["Date"],
+                    y=df_plot["value"],
+                    name=SERIES_TASAS[sid]["nombre"],
+                    mode="lines",
+                )
+            )
+
+        if show_infl_line and (not rem29_d.empty):
+            infl_plot = rem29_d[(rem29_d["Date"] >= min_sel) & (rem29_d["Date"] <= max_sel)].copy()
+            fig.add_trace(
+                go.Scatter(
+                    x=infl_plot["Date"],
+                    y=infl_plot["value"],
+                    name="Inflación esperada (REM 12m)",
+                    mode="lines",
+                    line=dict(dash="dot"),
+                )
+            )
+
+        # Eje X en español (ticks manuales)
+        mes_es = {
+            1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
+            7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
+        }
+        tickvals = pd.date_range(pd.to_datetime(min_sel).normalize(), pd.to_datetime(max_sel).normalize(), freq="6MS")
+        ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
+
+        fig.update_layout(
+            hovermode="x unified",
+            height=450,
+            margin=dict(l=10, r=10, t=10, b=60),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        )
+
+        fig.update_yaxes(title_text="% (TNA)", ticksuffix="%")
+        fig.update_xaxes(
+            title_text="",
+            range=[min_sel, max_sel],
+            tickmode="array",
+            tickvals=tickvals,
+            ticktext=ticktext,
+            rangeslider=dict(visible=False),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown(
+            "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
+            "Fuente: Banco Central de la República Argentina."
+            "</div>",
+            unsafe_allow_html=True,
+        )
