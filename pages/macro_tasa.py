@@ -14,20 +14,70 @@ def render_macro_tasa(go_to):
         go_to("macro_home")
 
     st.markdown("## 📈 Tasa de interés")
-    st.caption("Tasa de adelantos a cuentas corrientes de empresas - % TNA")
+
+    # ----------------------------
+    # Selector de serie
+    # ----------------------------
+    SERIES = {
+        13: {
+            "label": "Adelantos en cuenta corriente",
+            "caption": "Tasa de interés por adelantos en cuenta corriente - % TNA",
+            "unit_short": "TNA",
+            "y_title": "% TNA",
+            "csv_col": "tna",
+        },
+        12: {
+            "label": "Depósitos a 30 días (plazo)",
+            "caption": "Tasa de interés de depósitos a 30 días de plazo en entidades financieras - % TNA",
+            "unit_short": "TNA",
+            "y_title": "% TNA",
+            "csv_col": "tna",
+        },
+        14: {
+            "label": "Préstamos personales",
+            "caption": "Tasa de interés de préstamos personales - % TNA",
+            "unit_short": "TNA",
+            "y_title": "% TNA",
+            "csv_col": "tna",
+        },
+        29: {
+            "label": "Inflación esperada (REM) 12m",
+            "caption": "REM: Mediana de la variación interanual próximos 12 meses (IPC) - %",
+            "unit_short": "%",
+            "y_title": "% i.a. (próx. 12m)",
+            "csv_col": "inflacion_esp_12m",
+        },
+    }
+
+    # Orden como te interesa ver en el selector
+    options = [13, 12, 14, 29]
+    labels = {k: SERIES[k]["label"] for k in options}
+
+    sel_id = st.selectbox(
+        "Serie",
+        options=options,
+        format_func=lambda k: labels.get(k, str(k)),
+        index=0,
+        label_visibility="collapsed",
+    )
+
+    meta = SERIES[sel_id]
+    st.caption(meta["caption"])
     st.divider()
 
-    tasa = get_monetaria_serie(145)
-    if tasa.empty:
-        st.warning("Sin datos de tasa.")
+    # ----------------------------
+    # Traigo serie seleccionada
+    # ----------------------------
+    df = get_monetaria_serie(sel_id)
+    if df.empty:
+        st.warning("Sin datos para la serie seleccionada.")
         return
 
-    tasa = tasa.dropna(subset=["Date", "value"]).sort_values("Date").reset_index(drop=True)
+    df = df.dropna(subset=["Date", "value"]).sort_values("Date").reset_index(drop=True)
 
     # Último dato
-    last_val = float(tasa["value"].iloc[-1])
-    last_date_ts = pd.to_datetime(tasa["Date"].iloc[-1])
-    last_date = last_date_ts.date()
+    last_val = float(df["value"].iloc[-1])
+    last_date_ts = pd.to_datetime(df["Date"].iloc[-1])
 
     c1, c2 = st.columns([1, 3])
 
@@ -36,7 +86,7 @@ def render_macro_tasa(go_to):
         st.markdown(
             f"""
             <div style="font-size:46px; font-weight:800; line-height:1.0;">
-                {_fmt_pct_es(last_val, 1)}% <span style="font-size:18px; font-weight:700;">TNA</span>
+                {_fmt_pct_es(last_val, 1)}% <span style="font-size:18px; font-weight:700;">{meta["unit_short"]}</span>
             </div>
             <div style="margin-top:8px; color:#6b7280; font-size:14px;">
                 Último dato: {last_date_ts.strftime("%d/%m/%Y")}
@@ -45,9 +95,12 @@ def render_macro_tasa(go_to):
             unsafe_allow_html=True,
         )
 
-        # (4) Descargar CSV debajo del "Último dato"
-        csv_bytes = tasa.rename(columns={"Date": "date", "value": "tna"}).to_csv(index=False).encode("utf-8")
-        file_name = f"tasa_tna_{last_date_ts.strftime('%Y-%m-%d')}.csv"
+        csv_bytes = (
+            df.rename(columns={"Date": "date", "value": meta["csv_col"]})
+            .to_csv(index=False)
+            .encode("utf-8")
+        )
+        file_name = f"serie_{sel_id}_{last_date_ts.strftime('%Y-%m-%d')}.csv"
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         st.download_button(
             label="⬇️ Descargar CSV",
@@ -58,7 +111,7 @@ def render_macro_tasa(go_to):
         )
 
     with c2:
-        # Selector de período (sin mini-gráfico)
+        # Selector de período
         rango = st.radio(
             "Período",
             ["6M", "1A", "2A", "Todo"],
@@ -67,7 +120,7 @@ def render_macro_tasa(go_to):
             label_visibility="collapsed",
         )
 
-        max_real = pd.to_datetime(tasa["Date"].max())
+        max_real = pd.to_datetime(df["Date"].max())
         if rango == "6M":
             min_sel = max_real - pd.DateOffset(months=6)
         elif rango == "1A":
@@ -75,27 +128,45 @@ def render_macro_tasa(go_to):
         elif rango == "2A":
             min_sel = max_real - pd.DateOffset(years=2)
         else:
-            min_sel = pd.to_datetime(tasa["Date"].min())
+            min_sel = pd.to_datetime(df["Date"].min())
 
         # Aire a la derecha: 1 mes calendario
         max_sel = max_real + pd.DateOffset(months=1)
 
-        tasa_plot = tasa[tasa["Date"] >= min_sel].copy()
+        df_plot = df[df["Date"] >= min_sel].copy()
 
-        # Título dinámico (con espacios al inicio como pediste)
-        inflacion_esp_12m = 20.0
-        pos = "por encima" if last_val > inflacion_esp_12m else "debajo"
-        title_txt = (
-            f"   La tasa se ubica {pos} de la inflación esperada para los próximos 12 meses: "
-            f"{_fmt_pct_es(inflacion_esp_12m, 0)}%"
-        )
+        # ----------------------------
+        # Benchmark inflación esperada (id=29)
+        # ----------------------------
+        inflacion_esp_12m = None
+        if sel_id != 29:
+            infl = get_monetaria_serie(29)
+            if not infl.empty:
+                infl = infl.dropna(subset=["Date", "value"]).sort_values("Date")
+                inflacion_esp_12m = float(infl["value"].iloc[-1])
+
+        # fallback como tenías antes
+        if inflacion_esp_12m is None:
+            inflacion_esp_12m = 20.0
+
+        if sel_id == 29:
+            title_txt = (
+                "   Inflación esperada (REM) para los próximos 12 meses "
+                f"(mediana i.a.): {_fmt_pct_es(last_val, 1)}%"
+            )
+        else:
+            pos = "por encima" if last_val > inflacion_esp_12m else "debajo"
+            title_txt = (
+                f"   La tasa se ubica {pos} de la inflación esperada para los próximos 12 meses: "
+                f"{_fmt_pct_es(inflacion_esp_12m, 0)}%"
+            )
 
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
-                x=tasa_plot["Date"],
-                y=tasa_plot["value"],
-                name="Tasa",
+                x=df_plot["Date"],
+                y=df_plot["value"],
+                name="Serie",
                 mode="lines",
             )
         )
@@ -106,7 +177,7 @@ def render_macro_tasa(go_to):
             7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
         }
 
-        min_date = pd.to_datetime(tasa_plot["Date"].min())
+        min_date = pd.to_datetime(df_plot["Date"].min())
         max_date = max_sel
 
         tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq="6MS")
@@ -120,7 +191,7 @@ def render_macro_tasa(go_to):
             title=dict(text=title_txt, x=0, xanchor="left"),
         )
 
-        fig.update_yaxes(title_text="% TNA", ticksuffix="%")
+        fig.update_yaxes(title_text=meta["y_title"], ticksuffix="%")
         fig.update_xaxes(
             title_text="",
             range=[min_date, max_date],
@@ -132,7 +203,6 @@ def render_macro_tasa(go_to):
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # (1) Fuente debajo del gráfico, en gris similar a ejes
         st.markdown(
             "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
             "Fuente: Banco Central de la República Argentina."
