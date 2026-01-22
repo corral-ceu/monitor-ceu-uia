@@ -1,35 +1,37 @@
-
 import base64
 import streamlit as st
 
 
 def header_banner(image_path: str):
-    """
-    Banner full-width, sin recorte, alto mínimo necesario,
-    pegado arriba de todo.
-    """
     with open(image_path, "rb") as f:
         img_base64 = base64.b64encode(f.read()).decode("utf-8")
 
     st.markdown(
         f"""
         <style>
-          /* Saca espacio superior default de Streamlit */
+          /* Pegarlo arriba: reduce paddings default de Streamlit */
+          section.main > div {{
+            padding-top: 0rem;
+          }}
           .block-container {{
             padding-top: 0rem;
           }}
 
+          /* Banner full width, sin recorte */
           .ceu-banner {{
             width: 100vw;
-            aspect-ratio: 6 / 1;   /* ajusta proporción del banner */
+            aspect-ratio: 6 / 1;     /* ajustá si querés más bajo: 7/1 */
             margin-left: calc(-50vw + 50%);
-            margin-top: -1.5rem;
+            margin-top: -2.2rem;     /* sube más (ajustable) */
+
+            display: block;
+            line-height: 0;
 
             background-image: url("data:image/png;base64,{img_base64}");
             background-repeat: no-repeat;
             background-position: center;
             background-size: contain;
-            background-color: #2f4f8f; /* azul institucional de fondo */
+            background-color: #2f4f8f;
           }}
         </style>
 
@@ -39,9 +41,7 @@ def header_banner(image_path: str):
     )
 
 
-
 def render_main_home(go_to):
-    # Banner ARRIBA DE TODO
     header_banner("assets/header_ceu.png")
 
     st.markdown(
