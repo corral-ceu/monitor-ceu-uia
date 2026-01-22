@@ -303,7 +303,6 @@ def get_itcrm_excel_long() -> pd.DataFrame:
 # ============================================================
 # DATOS.GOB.AR — EMAE (INDEC)
 # ============================================================
-from io import StringIO  # <- si ya lo agregaste arriba, no hace falta repetirlo
 
 DATOS_GOB_AR_SERIES_URL = "https://apis.datos.gob.ar/series/api/series"
 
@@ -312,7 +311,8 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
     Parsea CSV de datos.gob.ar.
     Soporta:
       - formato largo: indice_tiempo, serie_id, valor
-      - formato ancho: indice_tiempo + columna con el id de la serie (a veces)
+      - formato ancho: indice_tiempo + columna con el id de la serie
+      - formato simple: indice_tiempo, valor   <-- ESTE ERA EL QUE FALTABA
     Devuelve DataFrame con columnas Date, Value.
     """
     try:
@@ -320,23 +320,28 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
         if df.empty:
             return pd.DataFrame(columns=["Date", "Value"])
 
-        # Normalizamos nombres posibles
-        cols = [c.strip() for c in df.columns]
-        df.columns = cols
+        df.columns = [c.strip() for c in df.columns]
 
-        # 1) Formato largo típico
-        if {"indice_tiempo", "serie_id", "valor"}.issubset(set(df.columns)):
-            out = df[df["serie_id"] == series_id].copy()
+        # 1) Formato largo
+        if {"indice_tiempo", "serie_id", "valor"}.issubset(df.columns):
+            out = df[df["serie_id"] == series_id][["indice_tiempo", "valor"]].copy()
             out = out.rename(columns={"indice_tiempo": "Date", "valor": "Value"})
-        # 2) Formato ancho (poco frecuente pero pasa)
+
+        # 2) Formato ancho
         elif "indice_tiempo" in df.columns and series_id in df.columns:
             out = df[["indice_tiempo", series_id]].copy()
             out = out.rename(columns={"indice_tiempo": "Date", series_id: "Value"})
-        # 3) Otro formato: fecha/valor
-        elif "fecha" in df.columns and "valor" in df.columns:
-            out = df.rename(columns={"fecha": "Date", "valor": "Value"}).copy()
+
+        # 3) ✅ Formato simple (una sola serie)
+        elif {"indice_tiempo", "valor"}.issubset(df.columns):
+            out = df[["indice_tiempo", "valor"]].copy()
+            out = out.rename(columns={"indice_tiempo": "Date", "valor": "Value"})
+
+        # 4) Fallback clásico
+        elif {"fecha", "valor"}.issubset(df.columns):
+            out = df.rename(columns={"fecha": "Date", "valor": "Value"})[["Date", "Value"]]
+
         else:
-            # No reconocimos el esquema
             return pd.DataFrame(columns=["Date", "Value"])
 
         out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
@@ -348,8 +353,10 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
                .sort_values("Date")
                .reset_index(drop=True)
         )
+
     except Exception:
         return pd.DataFrame(columns=["Date", "Value"])
+
 
 
 @st.cache_data(ttl=12 * 60 * 60)
