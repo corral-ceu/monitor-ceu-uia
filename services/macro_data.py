@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from io import BytesIO
+from io import StringIO 
 
 
 # ============================================================
@@ -302,23 +303,50 @@ def get_itcrm_excel_long() -> pd.DataFrame:
 # ============================================================
 # DATOS.GOB.AR — EMAE (INDEC)
 # ============================================================
+from io import StringIO  # <- si ya lo agregaste arriba, no hace falta repetirlo
+
 DATOS_GOB_AR_SERIES_URL = "https://apis.datos.gob.ar/series/api/series"
 
-def _parse_datos_gob_series(json_data: dict) -> pd.DataFrame:
-    """Parsea respuesta de /series de datos.gob.ar a DataFrame(Date, Value)."""
+def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
+    """
+    Parsea CSV de datos.gob.ar.
+    Soporta:
+      - formato largo: indice_tiempo, serie_id, valor
+      - formato ancho: indice_tiempo + columna con el id de la serie (a veces)
+    Devuelve DataFrame con columnas Date, Value.
+    """
     try:
-        data = json_data.get("data", [])
-        if not data:
+        df = pd.read_csv(StringIO(csv_text))
+        if df.empty:
             return pd.DataFrame(columns=["Date", "Value"])
-        # data: [ ["YYYY-MM-DD", value], ... ]
-        df = pd.DataFrame(data, columns=["Date", "Value"])
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+
+        # Normalizamos nombres posibles
+        cols = [c.strip() for c in df.columns]
+        df.columns = cols
+
+        # 1) Formato largo típico
+        if {"indice_tiempo", "serie_id", "valor"}.issubset(set(df.columns)):
+            out = df[df["serie_id"] == series_id].copy()
+            out = out.rename(columns={"indice_tiempo": "Date", "valor": "Value"})
+        # 2) Formato ancho (poco frecuente pero pasa)
+        elif "indice_tiempo" in df.columns and series_id in df.columns:
+            out = df[["indice_tiempo", series_id]].copy()
+            out = out.rename(columns={"indice_tiempo": "Date", series_id: "Value"})
+        # 3) Otro formato: fecha/valor
+        elif "fecha" in df.columns and "valor" in df.columns:
+            out = df.rename(columns={"fecha": "Date", "valor": "Value"}).copy()
+        else:
+            # No reconocimos el esquema
+            return pd.DataFrame(columns=["Date", "Value"])
+
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+        out["Value"] = pd.to_numeric(out["Value"], errors="coerce")
+
         return (
-            df.dropna(subset=["Date", "Value"])
-              .drop_duplicates(subset=["Date"])
-              .sort_values("Date")
-              .reset_index(drop=True)
+            out.dropna(subset=["Date", "Value"])
+               .drop_duplicates(subset=["Date"])
+               .sort_values("Date")
+               .reset_index(drop=True)
         )
     except Exception:
         return pd.DataFrame(columns=["Date", "Value"])
@@ -326,18 +354,35 @@ def _parse_datos_gob_series(json_data: dict) -> pd.DataFrame:
 
 @st.cache_data(ttl=12 * 60 * 60)
 def get_datos_gob_series(series_id: str) -> pd.DataFrame:
-    """Descarga una serie puntual desde datos.gob.ar. Devuelve Date, Value."""
+    """
+    Descarga una serie puntual desde datos.gob.ar.
+    Usamos CSV (probado por vos en Jupyter) porque suele ser lo más estable.
+    """
+    params = {"ids": series_id, "format": "csv", "limit": 10000}
+
     try:
-        params = {"ids": series_id, "format": "json", "limit":10000}
-        r = requests.get(DATOS_GOB_AR_SERIES_URL, params=params, timeout=30)
-        r.raise_for_status()
-        js = r.json()
-        return _parse_datos_gob_series(js)
-    except Exception:
+        r = requests.get(
+            DATOS_GOB_AR_SERIES_URL,
+            params=params,
+            timeout=30,
+            headers={
+                "User-Agent": "monitor-ceu-uia/1.0 (streamlit)",
+                "Accept": "text/csv,*/*",
+            },
+        )
+        # Si falla, queremos ver algo útil en la app (no silencio total)
+        if r.status_code != 200:
+            st.warning(f"datos.gob.ar ({series_id}) status={r.status_code}: {r.text[:200]}")
+            return pd.DataFrame(columns=["Date", "Value"])
+
+        return _parse_datos_gob_series_csv(r.text, series_id)
+
+    except Exception as e:
+        st.warning(f"datos.gob.ar ({series_id}) error: {e}")
         return pd.DataFrame(columns=["Date", "Value"])
 
 
-# IDs (según lo que vos ya tenés definido)
+# IDs (confirmados por vos)
 EMAE_ORIGINAL_ID = "143.3_NO_PR_2004_A_21"
 EMAE_DESEASON_ID = "143.3_NO_PR_2004_A_31"
 
@@ -350,3 +395,4 @@ def get_emae_original() -> pd.DataFrame:
 @st.cache_data(ttl=12 * 60 * 60)
 def get_emae_deseasonalizado() -> pd.DataFrame:
     return get_datos_gob_series(EMAE_DESEASON_ID)
+
