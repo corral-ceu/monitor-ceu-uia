@@ -328,7 +328,7 @@ def _parse_datos_gob_series(json_data: dict) -> pd.DataFrame:
 def get_datos_gob_series(series_id: str) -> pd.DataFrame:
     """Descarga una serie puntual desde datos.gob.ar. Devuelve Date, Value."""
     try:
-        params = {"ids": series_id, "format": "json"}
+        params = {"ids": series_id, "format": "json", "limit":10000}
         r = requests.get(DATOS_GOB_AR_SERIES_URL, params=params, timeout=30)
         r.raise_for_status()
         js = r.json()
