@@ -20,6 +20,7 @@ from pages.macro_home import render_macro_home
 from pages.macro_fx import render_macro_fx
 from pages.macro_tasa import render_macro_tasa
 from pages.macro_precios import render_macro_precios
+from pages.macro_pbi_emae import render_macro_pbi_emae
 from pages.empleo import render_empleo
 from pages.ipi import render_ipi
 
@@ -75,6 +76,11 @@ elif sec == "macro_precios":
     if st.button("← Volver a secciones"):
         go_to("home")
     render_macro_precios(go_to)
+
+elif sec == "macro_pbi_emae":
+    if st.button("← Volver a secciones"):
+        go_to("home")
+    render_macro_pbi_emae(go_to)
 
 elif sec == "empleo":
     render_empleo(go_to)
