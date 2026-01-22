@@ -6,7 +6,9 @@ from services.macro_data import (
     get_a3500,
     get_monetaria_serie,
     get_ipc_bcra,
+    get_emae_original,
 )
+
 
 # ============================================================
 # Frases (loading)
@@ -85,6 +87,21 @@ def _last_ipc_bcra():
         return None, None
     r = df.iloc[-1]
     return float(r["v_m_CPI"]), pd.to_datetime(r["Date"])
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def _last_emae_yoy():
+    df = get_emae_original()  # Date, Value
+    if df is None or df.empty:
+        return None, None
+    df = df.dropna(subset=["Date", "Value"]).sort_values("Date").copy()
+    df["YoY"] = (df["Value"] / df["Value"].shift(12) - 1.0) * 100.0
+    df = df.dropna(subset=["YoY"])
+    if df.empty:
+        return None, None
+    r = df.iloc[-1]
+    return float(r["YoY"]), pd.to_datetime(r["Date"])
+
 
 
 # ============================================================
@@ -198,7 +215,7 @@ def render_macro_home(go_to):
     with mid:
         st.markdown('<div class="home-cards">', unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
 
         # ============================================================
         # Loading phrases (solo mientras obtiene últimos datos)
@@ -210,6 +227,8 @@ def render_macro_home(go_to):
             fx_val, fx_date = _last_tc()
             tasa_val, tasa_date = _last_tasa(13)     # Adelantos a Empresas
             ipc_val, ipc_date = _last_ipc_bcra()     # IPC BCRA (decimal)
+            emae_yoy, emae_date = _last_emae_yoy()
+
 
         fact_ph.empty()
 
@@ -242,6 +261,17 @@ def render_macro_home(go_to):
             else:
                 value = _fmt_pct_es(ipc_val * 100, 1)
                 _kpi_card(value, "IPC", _fmt_mes_anio_es(ipc_date))
+
+        with c4:
+            if st.button("📈\nPBI / EMAE", use_container_width=True):
+                go_to("macro_pbi_emae")
+        
+            if emae_yoy is None or emae_date is None:
+                _kpi_card("—", "EMAE (i.a.)", "")
+            else:
+                value = _fmt_pct_es(emae_yoy, 1)
+                _kpi_card(value, "EMAE (i.a.)", _fmt_mes_anio_es(emae_date))
+
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
