@@ -2,7 +2,22 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
+#### NUEVO: para elegir una frase aleatoria
+import random
+####
+
 from services.macro_data import get_monetaria_serie
+
+
+#### NUEVO: pool de frases (se muestra UNA sola)
+INDU_LOADING_PHRASES = [
+    "La industria aporta más del 18% del valor agregado de la economía argentina.",
+    "La industria es el segundo mayor empleador privado del país.",
+    "Por cada empleo industrial directo se generan casi dos empleos indirectos.",
+    "Los salarios industriales son 23% más altos que el promedio privado.",
+    "Dos tercios de las exportaciones argentinas provienen de la industria.",
+]
+####
 
 
 def _fmt_pct_es(x: float, dec: int = 1) -> str:
@@ -113,6 +128,11 @@ def render_macro_tasa(go_to):
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
+    #### NUEVO: frase mientras carga REM + tasas (se borra al terminar)
+    fact_ph = st.empty()
+    fact_ph.info("💡 " + random.choice(INDU_LOADING_PHRASES))
+    ####
+
     # ---------- REM 29 como benchmark (mensual -> diario) ----------
     rem29_m = get_monetaria_serie(29)
     rem29_d = _rem29_to_daily(rem29_m)
@@ -126,6 +146,10 @@ def render_macro_tasa(go_to):
             continue
         df = df.dropna(subset=["Date", "value"]).sort_values("Date").reset_index(drop=True)
         series_data[sid] = df
+
+    #### NUEVO: limpiar mensaje cuando termina la carga de datos
+    fact_ph.empty()
+    ####
 
     if not series_data:
         st.warning("Sin datos para las tasas seleccionadas.")
