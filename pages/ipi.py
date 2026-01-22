@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-
+MESES_ES = ["ene", "feb", "mar", "abr", "may", "jun",
+            "jul", "ago", "sep", "oct", "nov", "dic"]
 from services.ipi_data import cargar_ipi_excel, procesar_serie_excel
 from services.metrics import calc_var, fmt, obtener_nombre_mes
 
@@ -10,13 +11,23 @@ from services.metrics import calc_var, fmt, obtener_nombre_mes
 # =========================
 # HELPER SPARKLINE
 # =========================
-def sparkline_fig(df_serie, height=90):
+def sparkline_fig(df_serie, height=130):
     if df_serie is None or df_serie.empty:
         return None
 
-    s = df_serie.dropna().sort_values("fecha").tail(18)
+    s = df_serie.dropna().sort_values("fecha").tail(24)
     if s.empty:
         return None
+
+    # Labels X en español mmm-yy
+    x_lbl = s["fecha"].map(lambda d: f"{MESES_ES[d.month-1]}-{str(d.year)[-2:]}")
+
+    # Y formateado con coma
+    y_fmt = s["valor"].map(lambda v: f"{v:.1f}".replace(".", ","))
+
+    # Ticks X (no saturar)
+    n_ticks = min(6, len(s))
+    tick_idx = np.linspace(0, len(s) - 1, num=n_ticks, dtype=int)
 
     fig = go.Figure()
     fig.add_trace(
@@ -25,20 +36,39 @@ def sparkline_fig(df_serie, height=90):
             y=s["valor"],
             mode="lines",
             line=dict(width=2),
-            hovertemplate="%{x|%b-%y}: %{y:.1f}<extra></extra>",
+            customdata=np.column_stack([x_lbl, y_fmt]),
+            hovertemplate="%{customdata[0]}: %{customdata[1]}<extra></extra>",
             showlegend=False,
         )
     )
+
     fig.update_layout(
         height=height,
-        margin=dict(l=0, r=0, t=0, b=0),
+        margin=dict(l=55, r=10, t=5, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
+        separators=",.",  # coma decimal
     )
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    return fig
 
+    fig.update_xaxes(
+        tickmode="array",
+        tickvals=s["fecha"].iloc[tick_idx],
+        ticktext=x_lbl.iloc[tick_idx],
+        ticks="outside",
+        showgrid=False,
+        zeroline=False,
+        tickfont=dict(size=10),
+    )
+
+    fig.update_yaxes(
+        ticks="outside",
+        showgrid=False,
+        zeroline=False,
+        tickfont=dict(size=10),
+        tickformat=".1f",
+    )
+
+    return fig
 
 def render_ipi(go_to):
     if st.button("← Volver"):
