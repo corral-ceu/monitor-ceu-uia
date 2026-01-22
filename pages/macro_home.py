@@ -1,11 +1,23 @@
 import streamlit as st
 import pandas as pd
+import random
 
 from services.macro_data import (
     get_a3500,
     get_monetaria_serie,
     get_ipc_bcra,
 )
+
+# ============================================================
+# Frases (loading)
+# ============================================================
+INDU_LOADING_PHRASES = [
+    "La industria aporta más del 18% del valor agregado de la economía argentina.",
+    "La industria es el segundo mayor empleador privado del país.",
+    "Por cada empleo industrial directo se generan casi dos empleos indirectos.",
+    "Los salarios industriales son 23% más altos que el promedio privado.",
+    "Dos tercios de las exportaciones argentinas provienen de la industria.",
+]
 
 # ============================================================
 # Format helpers (ES)
@@ -31,18 +43,17 @@ def _mes_es_abbr(m: int) -> str:
     }.get(m, "")
 
 def _fmt_mes_anio_es(dt: pd.Timestamp) -> str:
-    # dic-25
     if dt is None or pd.isna(dt):
         return ""
     return f"{_mes_es_abbr(dt.month)}-{str(dt.year)[-2:]}"
 
 
 # ============================================================
-# Últimos datos (cacheados para no hacer lenta la Home)
+# Últimos datos (cacheados)
 # ============================================================
 @st.cache_data(ttl=12 * 60 * 60)
 def _last_tc():
-    df = get_a3500()  # columnas: Date, FX
+    df = get_a3500()  # Date, FX
     if df is None or df.empty:
         return None, None
     df = df.dropna(subset=["Date", "FX"]).sort_values("Date")
@@ -54,8 +65,7 @@ def _last_tc():
 
 @st.cache_data(ttl=12 * 60 * 60)
 def _last_tasa(default_id: int = 13):
-    # Monetarias: Date, value
-    df = get_monetaria_serie(default_id)
+    df = get_monetaria_serie(default_id)  # Date, value
     if df is None or df.empty:
         return None, None
     df = df.dropna(subset=["Date", "value"]).sort_values("Date")
@@ -67,8 +77,7 @@ def _last_tasa(default_id: int = 13):
 
 @st.cache_data(ttl=12 * 60 * 60)
 def _last_ipc_bcra():
-    # BCRA IPC: Date, v_m_CPI (decimal), Period
-    df = get_ipc_bcra()
+    df = get_ipc_bcra()  # Date, v_m_CPI (decimal)
     if df is None or df.empty:
         return None, None
     df = df.dropna(subset=["Date", "v_m_CPI"]).sort_values("Date")
@@ -79,15 +88,15 @@ def _last_ipc_bcra():
 
 
 # ============================================================
-# Small “KPI under button” component (HTML)
+# Mini-card KPI (HTML)
 # ============================================================
-def _kpi_under_button(value_line: str, label_line: str, date_line: str) -> None:
+def _kpi_card(value_html: str, label: str, date: str) -> None:
     st.markdown(
         f"""
-        <div class="mini-kpi">
-          <div class="mini-kpi__value">{value_line}</div>
-          <div class="mini-kpi__label">{label_line}</div>
-          <div class="mini-kpi__date">{date_line}</div>
+        <div class="kpi-card">
+          <div class="kpi-card__value">{value_html}</div>
+          <div class="kpi-card__label">{label}</div>
+          <div class="kpi-card__date">{date}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -95,41 +104,56 @@ def _kpi_under_button(value_line: str, label_line: str, date_line: str) -> None:
 
 
 def render_macro_home(go_to):
-    # --- Estilo “moderno, limpio, centrado”
+    # --- Estilos: “mini card” fresca, sobria, moderna
     st.markdown(
         """
         <style>
-          .mini-kpi{
-            margin-top: 10px;
+          .kpi-card{
+            margin: 10px auto 0 auto;
+            width: 92%;
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.10); /* slate-900 @10% */
+            border-radius: 14px;
+            padding: 10px 10px 9px 10px;
             text-align: center;
-            padding: 6px 6px 0 6px;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
           }
-          .mini-kpi__value{
-            font-size: 22px;
-            font-weight: 800;
-            letter-spacing: -0.2px;
-            color: #0f172a; /* slate-900 */
-            line-height: 1.1;
+          .kpi-card__value{
+            font-size: 26px;
+            font-weight: 900;
+            letter-spacing: -0.4px;
+            color: #0f172a;
+            line-height: 1.05;
           }
-          .mini-kpi__value span.kpi-prefix{
+          .kpi-prefix{
+            display: inline-block;
             font-size: 12px;
-            font-weight: 700;
-            color: #334155; /* slate-700 */
-            letter-spacing: 0.2px;
-            margin-right: 6px;
-            vertical-align: 20%;
+            font-weight: 800;
+            color: #475569; /* slate-600 */
+            letter-spacing: 0.6px;
+            margin-right: 8px;
+            vertical-align: 30%;
+            text-transform: uppercase;
           }
-          .mini-kpi__label{
-            margin-top: 4px;
+          .kpi-suffix{
+            font-size: 12px;
+            font-weight: 900;
+            color: #334155;
+            margin-left: 6px;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+          }
+          .kpi-card__label{
+            margin-top: 6px;
             font-size: 13px;
-            font-weight: 600;
-            color: #334155; /* slate-700 */
+            font-weight: 700;
+            color: #334155;
             line-height: 1.2;
           }
-          .mini-kpi__date{
-            margin-top: 3px;
+          .kpi-card__date{
+            margin-top: 4px;
             font-size: 12px;
-            color: #64748b; /* slate-500 */
+            color: #64748b;
             line-height: 1.2;
           }
         </style>
@@ -154,49 +178,48 @@ def render_macro_home(go_to):
 
         c1, c2, c3 = st.columns(3)
 
-        # ------------------------------------------------------------
-        # Últimos datos (cacheados)
-        # ------------------------------------------------------------
-        fx_val, fx_date = _last_tc()
-        tasa_val, tasa_date = _last_tasa(13)  # Adelantos a Empresas
-        ipc_val, ipc_date = _last_ipc_bcra()  # v_m_CPI decimal
+        # ============================================================
+        # Loading phrases (solo mientras obtiene últimos datos)
+        # ============================================================
+        fact_ph = st.empty()
+        fact_ph.info("💡 " + random.choice(INDU_LOADING_PHRASES))
+
+        with st.spinner("Actualizando últimos datos..."):
+            fx_val, fx_date = _last_tc()
+            tasa_val, tasa_date = _last_tasa(13)     # Adelantos a Empresas
+            ipc_val, ipc_date = _last_ipc_bcra()     # IPC BCRA (decimal)
+
+        fact_ph.empty()
 
         with c1:
             if st.button("💱\nTipo de cambio", use_container_width=True):
                 go_to("macro_fx")
 
             if fx_val is None or fx_date is None:
-                _kpi_under_button("—", "TC Mayorista", "")
+                _kpi_card("—", "TC Mayorista", "")
             else:
                 value = f"<span class='kpi-prefix'>ARS/USD</span>{_fmt_thousands_es_int(fx_val)}"
-                label = "TC Mayorista"
-                date = fx_date.strftime("%d/%m/%Y")
-                _kpi_under_button(value, label, date)
+                _kpi_card(value, "TC Mayorista", fx_date.strftime("%d/%m/%Y"))
 
         with c2:
             if st.button("📈\nTasa de interés", use_container_width=True):
                 go_to("macro_tasa")
 
             if tasa_val is None or tasa_date is None:
-                _kpi_under_button("—", "Adelantos a Empresas", "")
+                _kpi_card("—", "Adelantos a Empresas", "")
             else:
-                value = f"{_fmt_pct_es(tasa_val, 1)} <span style='font-size:12px;font-weight:800;color:#334155;'>TNA</span>"
-                label = "Adelantos a Empresas"
-                date = tasa_date.strftime("%d/%m/%Y")
-                _kpi_under_button(value, label, date)
+                value = f"{_fmt_pct_es(tasa_val, 1)}<span class='kpi-suffix'>TNA</span>"
+                _kpi_card(value, "Adelantos a Empresas", tasa_date.strftime("%d/%m/%Y"))
 
         with c3:
             if st.button("🛒\nPrecios", use_container_width=True):
                 go_to("macro_precios")
 
             if ipc_val is None:
-                _kpi_under_button("—", "IPC", "")
+                _kpi_card("—", "IPC", "")
             else:
-                # ipc_val decimal -> % m/m
                 value = _fmt_pct_es(ipc_val * 100, 1)
-                label = "IPC"
-                date = _fmt_mes_anio_es(ipc_date) if ipc_date is not None else ""
-                _kpi_under_button(value, label, date)
+                _kpi_card(value, "IPC", _fmt_mes_anio_es(ipc_date))
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
