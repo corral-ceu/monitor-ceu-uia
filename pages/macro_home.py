@@ -108,8 +108,8 @@ def render_macro_home(go_to):
     st.markdown(
         """
         <style>
-          /* Texto de los botones de la home en negrita */
-          div.home-cards button {
+          /* Texto de los botones de la home en negrita (Streamlit real DOM) */
+          div.home-cards div[data-testid="stButton"] > button {
             font-weight: 700 !important;
             letter-spacing: 0.2px;
           }
@@ -117,6 +117,7 @@ def render_macro_home(go_to):
         """,
         unsafe_allow_html=True,
     )
+
 
     
     # --- Estilos: “mini card” fresca, sobria, moderna
