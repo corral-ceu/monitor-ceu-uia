@@ -297,3 +297,56 @@ def get_itcrm_excel_long() -> pd.DataFrame:
         .reset_index(drop=True)
     )
     return long_df
+
+
+# ============================================================
+# DATOS.GOB.AR — EMAE (INDEC)
+# ============================================================
+DATOS_GOB_AR_SERIES_URL = "https://apis.datos.gob.ar/series/api/series"
+
+def _parse_datos_gob_series(json_data: dict) -> pd.DataFrame:
+    """Parsea respuesta de /series de datos.gob.ar a DataFrame(Date, Value)."""
+    try:
+        data = json_data.get("data", [])
+        if not data:
+            return pd.DataFrame(columns=["Date", "Value"])
+        # data: [ ["YYYY-MM-DD", value], ... ]
+        df = pd.DataFrame(data, columns=["Date", "Value"])
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+        return (
+            df.dropna(subset=["Date", "Value"])
+              .drop_duplicates(subset=["Date"])
+              .sort_values("Date")
+              .reset_index(drop=True)
+        )
+    except Exception:
+        return pd.DataFrame(columns=["Date", "Value"])
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_datos_gob_series(series_id: str) -> pd.DataFrame:
+    """Descarga una serie puntual desde datos.gob.ar. Devuelve Date, Value."""
+    try:
+        params = {"ids": series_id, "format": "json"}
+        r = requests.get(DATOS_GOB_AR_SERIES_URL, params=params, timeout=30)
+        r.raise_for_status()
+        js = r.json()
+        return _parse_datos_gob_series(js)
+    except Exception:
+        return pd.DataFrame(columns=["Date", "Value"])
+
+
+# IDs (según lo que vos ya tenés definido)
+EMAE_ORIGINAL_ID = "143.3_NO_PR_2004_A_21"
+EMAE_DESEASON_ID = "453.1_SERIE_DESEADA_0_0_24_58"
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_emae_original() -> pd.DataFrame:
+    return get_datos_gob_series(EMAE_ORIGINAL_ID)
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_emae_deseasonalizado() -> pd.DataFrame:
+    return get_datos_gob_series(EMAE_DESEASON_ID)
