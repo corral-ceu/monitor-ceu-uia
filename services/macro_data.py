@@ -363,7 +363,7 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
 def get_datos_gob_series(series_id: str) -> pd.DataFrame:
     """
     Descarga una serie puntual desde datos.gob.ar.
-    Usamos CSV (probado por vos en Jupyter) porque suele ser lo más estable.
+    Usamos CSV porque en Jupyter te funciona perfecto.
     """
     params = {"ids": series_id, "format": "csv", "limit": 1000}
 
@@ -377,10 +377,25 @@ def get_datos_gob_series(series_id: str) -> pd.DataFrame:
                 "Accept": "text/csv,*/*",
             },
         )
+
         # Si falla, queremos ver algo útil en la app (no silencio total)
         if r.status_code != 200:
             st.warning(f"datos.gob.ar ({series_id}) status={r.status_code}: {r.text[:200]}")
             return pd.DataFrame(columns=["Date", "Value"])
+
+        # DEBUG TEMPORAL (borrar cuando ande)
+        st.write(
+            f"DEBUG datos.gob.ar {series_id}: status={r.status_code}, "
+            f"content-type={r.headers.get('content-type')}"
+        )
+        st.write("DEBUG first 200 chars:", r.text[:200])
+
+        try:
+            _tmp = pd.read_csv(StringIO(r.text), nrows=5)
+            st.write("DEBUG cols:", _tmp.columns.tolist())
+            st.write("DEBUG head:", _tmp.head())
+        except Exception as e:
+            st.error(f"DEBUG read_csv failed: {e}")
 
         return _parse_datos_gob_series_csv(r.text, series_id)
 
@@ -389,17 +404,70 @@ def get_datos_gob_series(series_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["Date", "Value"])
 
 
+
 # IDs (confirmados por vos)
 EMAE_ORIGINAL_ID = "143.3_NO_PR_2004_A_21"
 EMAE_DESEASON_ID = "143.3_NO_PR_2004_A_31"
 
 
 @st.cache_data(ttl=12 * 60 * 60)
-def get_emae_original() -> pd.DataFrame:
-    return get_datos_gob_series(EMAE_ORIGINAL_ID)
+def get_emae_both_csv() -> pd.DataFrame:
+    ids = f"{EMAE_ORIGINAL_ID},{EMAE_DESEASON_ID}"
+    params = {"ids": ids, "format": "csv", "limit": 1000}
+
+    r = requests.get(
+        DATOS_GOB_AR_SERIES_URL,
+        params=params,
+        timeout=30,
+        headers={
+            "User-Agent": "monitor-ceu-uia/1.0 (streamlit)",
+            "Accept": "text/csv,*/*",
+        },
+    )
+
+    if r.status_code != 200:
+        st.warning(f"datos.gob.ar EMAE both status={r.status_code}: {r.text[:200]}")
+        return pd.DataFrame()
+
+    df = pd.read_csv(StringIO(r.text))
+    df.columns = [c.strip() for c in df.columns]
+
+    # Caso A) CSV ancho: indice_tiempo + columnas con ids
+    if "indice_tiempo" in df.columns and (EMAE_ORIGINAL_ID in df.columns) and (EMAE_DESEASON_ID in df.columns):
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        return df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    # Caso B) CSV largo: indice_tiempo, serie_id, valor
+    if {"indice_tiempo", "serie_id", "valor"}.issubset(df.columns):
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+        wide = (
+            df.pivot(index="indice_tiempo", columns="serie_id", values="valor")
+              .reset_index()
+              .rename_axis(None, axis=1)
+        )
+        return wide.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    # Si llega un formato inesperado:
+    st.warning(f"datos.gob.ar EMAE both: formato CSV inesperado. cols={df.columns.tolist()}")
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=12 * 60 * 60)
+def get_emae_original() -> pd.DataFrame:
+    df = get_emae_both_csv()
+    if df.empty or EMAE_ORIGINAL_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", EMAE_ORIGINAL_ID]].rename(columns={"indice_tiempo":"Date", EMAE_ORIGINAL_ID:"Value"})
+    return out.dropna().reset_index(drop=True)
+
+@st.cache_data(ttl=12 * 60 * 60)
 def get_emae_deseasonalizado() -> pd.DataFrame:
-    return get_datos_gob_series(EMAE_DESEASON_ID)
+    df = get_emae_both_csv()
+    if df.empty or EMAE_DESEASON_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", EMAE_DESEASON_ID]].rename(columns={"indice_tiempo":"Date", EMAE_DESEASON_ID:"Value"})
+    return out.dropna().reset_index(drop=True)
+
+
 
