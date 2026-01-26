@@ -34,10 +34,95 @@ def render_macro_fx(go_to):
     if st.button("← Volver"):
         go_to("macro_home")
 
-    st.markdown("## 💱 Tipo de cambio")
-    st.caption("Tipo de cambio mayorista de referencia y bandas cambiarias – ARS/USD")
-    st.divider()
+    # =========================
+    # Estilos (solo formato)
+    # =========================
+    st.markdown(
+        """
+        <style>
+          .fx-header{
+            padding: 18px 18px 14px 18px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.55);
+            border: 1px solid rgba(17,24,39,0.06);
+            box-shadow: 0 10px 30px rgba(17,24,39,0.08);
+            backdrop-filter: blur(6px);
+          }
+          .fx-title{
+            font-size: 44px;
+            font-weight: 850;
+            letter-spacing: -0.02em;
+            color: #111827;
+            display:flex;
+            align-items:center;
+            gap: 12px;
+            margin: 0;
+          }
+          .fx-icon{
+            width: 44px;
+            height: 44px;
+            border-radius: 16px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background: rgba(59,130,246,0.12);
+            color: #1d4ed8;
+            font-weight: 900;
+            font-size: 22px;
+          }
+          .fx-inline{
+            display:flex;
+            align-items: baseline;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+          }
+          .fx-pair{
+            font-size: 16px;
+            font-weight: 800;
+            color: #111827;
+            opacity: 0.92;
+          }
+          .fx-value{
+            font-size: 52px;
+            font-weight: 900;
+            letter-spacing: -0.03em;
+            color:#111827;
+            line-height: 1.0;
+          }
+          .fx-sub{
+            margin-top: 8px;
+            font-size: 14px;
+            color: #6b7280;
+          }
+          .fx-chips{
+            display:flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+          }
+          .fx-chip{
+            display:inline-flex;
+            align-items:center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.70);
+            border: 1px solid rgba(17,24,39,0.08);
+            font-size: 14px;
+            color:#111827;
+          }
+          .fx-chip b{ font-weight: 850; }
+          .fx-chip .up{ color:#047857; font-weight: 900; }
+          .fx-chip .down{ color:#b91c1c; font-weight: 900; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
+    # =========================
+    # Helpers
+    # =========================
     def asof_fx(df_fx: pd.DataFrame, target_date: pd.Timestamp):
         t = df_fx.dropna(subset=["Date", "FX"]).sort_values("Date")
         t = t[t["Date"] <= target_date]
@@ -118,7 +203,7 @@ def render_macro_fx(go_to):
 
     # TC sin huecos SOLO hasta el último dato observado (después queda vacío)
     last_fx_date = fx["Date"].max()
-    
+
     df["FX"] = df["FX"].ffill()
     df.loc[df["Date"] > last_fx_date, "FX"] = np.nan
 
@@ -135,58 +220,69 @@ def render_macro_fx(go_to):
         title_txt = f"   El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
 
     # =========================
-    # Layout KPI + gráfico
+    # NUEVO LAYOUT (solo formato)
+    # - Header moderno
+    # - Selector de rango a la derecha
+    # - Gráfico full width (MISMO CONTENIDO, MISMOS EJES)
     # =========================
-    kpi_col, chart_col = st.columns([1, 3], vertical_alignment="top")
 
-    with kpi_col:
+    # --- fila 1: header + selector rango
+    left, right = st.columns([3, 1], vertical_alignment="top")
+
+    with left:
+        # chips: signo para flecha
+        vm_txt = safe_pct(vm, 1)
+        va_txt = safe_pct(va, 1)
+
+        # Determinar flecha por signo (solo estética)
+        def _chip_arrow(txt: str):
+            if txt is None:
+                return "", ""
+            t = str(txt).strip()
+            if t.startswith("-"):
+                return "▼", "down"
+            return "▲", "up"
+
+        a1, c1 = _chip_arrow(vm_txt)
+        a2, c2 = _chip_arrow(va_txt)
+
         st.markdown(
             f"""
-            <div style="font-size:54px; font-weight:800; line-height:1.0;">
-              <span style="font-size:16px; font-weight:700; color:#111827;">ARS/USD</span>
-              {int(round(last_fx))}
+            <div class="fx-header">
+              <div class="fx-title">
+                <div class="fx-icon">$↗</div>
+                <div>Tipo de cambio</div>
+              </div>
+
+              <div class="fx-inline">
+                <div class="fx-pair">ARS/USD</div>
+                <div class="fx-value">{int(round(last_fx))}</div>
+              </div>
+
+              <div class="fx-sub">
+                Tipo de cambio oficial mayorista de referencia · Al {last_date.strftime('%d/%m/%Y')}
+              </div>
+
+              <div class="fx-chips">
+                <div class="fx-chip">
+                  <span class="{c1}">{a1}</span>
+                  <span><b>{vm_txt}</b> mensual</span>
+                </div>
+                <div class="fx-chip">
+                  <span class="{c2}">{a2}</span>
+                  <span><b>{va_txt}</b> interanual</span>
+                </div>
+              </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        st.caption(f"Fecha: {last_date.strftime('%d/%m/%Y')}")
 
-        st.markdown(
-            f"<div style='font-size:18px; margin-top:14px;'><b>% mensual:</b> {safe_pct(vm, 1)}</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<div style='font-size:18px; margin-top:8px;'><b>% anual:</b> {safe_pct(va, 1)}</div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        # CSV con TC + bandas
-        export = df[["Date", "FX", "lower", "upper"]].copy()
-        export = export.rename(
-            columns={
-                "Date": "date",
-                "FX": "tc_mayorista",
-                "lower": "banda_inferior",
-                "upper": "banda_superior",
-            }
-        )
-        csv_bytes = export.to_csv(index=False).encode("utf-8")
-        file_name = f"tc_bandas_{last_date.strftime('%Y-%m-%d')}.csv"
-
-        st.download_button(
-            label="⬇️ Descargar CSV",
-            data=csv_bytes,
-            file_name=file_name,
-            mime="text/csv",
-            use_container_width=False,
-        )
-
-    with chart_col:
-        # Selector rango (default 1A)
+    with right:
+        # Selector rango (default 1A) - MISMO radio, mismas opciones, misma key
         rango_map = {"6M": 180, "1A": 365, "2A": 365 * 2, "5A": 365 * 5, "TODO": None}
 
+        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         rango = st.radio(
             label="",
             options=list(rango_map.keys()),
@@ -196,97 +292,127 @@ def render_macro_fx(go_to):
             key="fx_rango",
         )
 
-        days = rango_map[rango]
-        if days is None:
-            min_date = fx_min
-        else:
-            min_date = max(fx_min, last_date - pd.Timedelta(days=days))
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-        df_plot = df[df["Date"] >= min_date].copy()
-
-        # aire a la derecha
-        max_date = pd.to_datetime(df["Date"].max()) + pd.DateOffset(months=1)
-
-        fig = go.Figure()
-
-        # Bandas
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["Date"],
-                y=df_plot["upper"],
-                name="Banda superior",
-                line=dict(dash="dash"),
-                hovertemplate="%{x|%d/%m/%Y}<br>Banda superior: %{y:.0f}<extra></extra>",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["Date"],
-                y=df_plot["lower"],
-                name="Banda inferior",
-                line=dict(dash="dash"),
-                fill="tonexty",
-                fillcolor="rgba(0,0,0,0.08)",
-                hovertemplate="%{x|%d/%m/%Y}<br>Banda inferior: %{y:.0f}<extra></extra>",
-            )
-        )
-
-        # TC
-        fig.add_trace(
-            go.Scatter(
-                x=df_plot["Date"],
-                y=df_plot["FX"],
-                name="TC mayorista",
-                mode="lines",
-                connectgaps=True,
-                hovertemplate="%{x|%d/%m/%Y}<br>TC mayorista: %{y:.2f}<extra></extra>",
-            )
-        )
-
-        # ticks en español
-        mes_es = {
-            1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
-            7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
+    # --- fila 2: gráfico + botón descargar (sin tocar contenido del gráfico)
+    # CSV con TC + bandas (igual que antes)
+    export = df[["Date", "FX", "lower", "upper"]].copy()
+    export = export.rename(
+        columns={
+            "Date": "date",
+            "FX": "tc_mayorista",
+            "lower": "banda_inferior",
+            "upper": "banda_superior",
         }
+    )
+    csv_bytes = export.to_csv(index=False).encode("utf-8")
+    file_name = f"tc_bandas_{last_date.strftime('%Y-%m-%d')}.csv"
 
-        # En TODO: etiquetas cada 6 meses; resto cada 2 meses
-        tick_freq = "6MS" if rango == "TODO" else "2MS"
-        tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq=tick_freq)
-        ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
+    # --- armado df_plot (MISMA LÓGICA)
+    days = rango_map[rango]
+    if days is None:
+        min_date = fx_min
+    else:
+        min_date = max(fx_min, last_date - pd.Timedelta(days=days))
 
-        fig.update_layout(
-            hovermode="x",
-            height=600,
-            margin=dict(l=10, r=10, t=90, b=60),
-            showlegend=True,
-            title=dict(text=title_txt, x=0, xanchor="left"),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1.0,
-                font=dict(size=12),
-            ),
+    df_plot = df[df["Date"] >= min_date].copy()
+
+    # aire a la derecha (MISMO)
+    max_date = pd.to_datetime(df["Date"].max()) + pd.DateOffset(months=1)
+
+    # =========================
+    # Gráfico (NO SE TOCA el contenido ni ejes)
+    # =========================
+    fig = go.Figure()
+
+    # Bandas
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["Date"],
+            y=df_plot["upper"],
+            name="Banda superior",
+            line=dict(dash="dash"),
+            hovertemplate="%{x|%d/%m/%Y}<br>Banda superior: %{y:.0f}<extra></extra>",
         )
-
-        fig.update_xaxes(
-            title_text="",
-            range=[min_date, max_date],
-            tickmode="array",
-            tickvals=tickvals,
-            ticktext=ticktext,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["Date"],
+            y=df_plot["lower"],
+            name="Banda inferior",
+            line=dict(dash="dash"),
+            fill="tonexty",
+            fillcolor="rgba(0,0,0,0.08)",
+            hovertemplate="%{x|%d/%m/%Y}<br>Banda inferior: %{y:.0f}<extra></extra>",
         )
-        fig.update_yaxes(title_text="")
+    )
 
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown(
-            "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
-            "Fuente: Banco Central de la República Argentina."
-            "</div>",
-            unsafe_allow_html=True,
+    # TC
+    fig.add_trace(
+        go.Scatter(
+            x=df_plot["Date"],
+            y=df_plot["FX"],
+            name="TC mayorista",
+            mode="lines",
+            connectgaps=True,
+            hovertemplate="%{x|%d/%m/%Y}<br>TC mayorista: %{y:.2f}<extra></extra>",
         )
+    )
+
+    # ticks en español (MISMO)
+    mes_es = {
+        1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
+        7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
+    }
+
+    # En TODO: etiquetas cada 6 meses; resto cada 2 meses (MISMO)
+    tick_freq = "6MS" if rango == "TODO" else "2MS"
+    tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq=tick_freq)
+    ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
+
+    # Layout (MISMO que tenías; solo afuera movimos el header)
+    fig.update_layout(
+        hovermode="x",
+        height=600,
+        margin=dict(l=10, r=10, t=90, b=60),
+        showlegend=True,
+        title=dict(text=title_txt, x=0, xanchor="left"),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1.0,
+            font=dict(size=12),
+        ),
+    )
+
+    fig.update_xaxes(
+        title_text="",
+        range=[min_date, max_date],
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=ticktext,
+    )
+    fig.update_yaxes(title_text="")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Botón descargar (abajo, izquierda) - solo formato alrededor, contenido igual
+    st.download_button(
+        label="⬇️ Descargar CSV",
+        data=csv_bytes,
+        file_name=file_name,
+        mime="text/csv",
+        use_container_width=False,
+    )
+
+    st.markdown(
+        "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
+        "Fuente: Banco Central de la República Argentina."
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     # =========================================================
     # TIPO DE CAMBIO REAL (ITCRM + bilaterales)
@@ -308,18 +434,18 @@ def render_macro_fx(go_to):
     series_all = sorted(tcr_long["Serie"].dropna().unique().tolist())
 
     default_sel = ["ITCRM"] if "ITCRM" in series_all else ([series_all[0]] if series_all else [])
-    
+
     # -------------------------
     # Selector de series (1 fila – 4 columnas)
     # -------------------------
     st.markdown("**Seleccionar series**")
-    
+
     # Usamos los nombres EXACTOS del Excel (incluido el espacio en ITCRM )
     series_focus = ["ITCRM ", "ITCRB Brasil", "ITCRB Estados Unidos", "ITCRB China"]
-    
+
     cols = st.columns(4)
     sel_series = []
-    
+
     for col, s in zip(cols, series_focus):
         with col:
             if st.checkbox(
@@ -328,7 +454,7 @@ def render_macro_fx(go_to):
                 key=f"itcrm_cb_{s}"
             ):
                 sel_series.append(s)
-    
+
     if not sel_series:
         st.info("Seleccioná al menos una serie para ver el gráfico.")
         return
