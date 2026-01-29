@@ -2,10 +2,10 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
-
-#### NUEVO: imports para frase aleatoria
 import random
-####
+import textwrap
+import yfinance as yf
+import streamlit.components.v1 as components  # <-- NUEVO
 
 from services.macro_data import (
     build_bands_2025,
@@ -13,13 +13,12 @@ from services.macro_data import (
     get_a3500,
     get_ipc_bcra,
     get_rem_last,
-    get_itcrm_excel_long,  # <-- AGREGAR
+    get_itcrm_excel_long,
 )
 
 from ui.common import safe_pct
 
 
-#### NUEVO: pool de frases (solo se muestra UNA, elegida al azar)
 INDU_LOADING_PHRASES = [
     "La industria aporta más del 18% del valor agregado de la economía argentina.",
     "La industria es el segundo mayor empleador privado del país.",
@@ -27,123 +26,277 @@ INDU_LOADING_PHRASES = [
     "Los salarios industriales son 23% más altos que el promedio privado.",
     "Dos tercios de las exportaciones argentinas provienen de la industria.",
 ]
-####
+
+
+# ============================================================
+# CCL (Yahoo proxy): CCL = YPFD.BA / YPF
+# ============================================================
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ccl_yahoo() -> pd.DataFrame:
+    def _close_series(ticker: str, out_name: str) -> pd.Series:
+        px = yf.download(ticker, period="max", progress=False)
+
+        if isinstance(px.columns, pd.MultiIndex):
+            if ("Close", ticker) in px.columns:
+                s = px[("Close", ticker)]
+            elif ("Adj Close", ticker) in px.columns:
+                s = px[("Adj Close", ticker)]
+            else:
+                try:
+                    s = px.xs("Close", axis=1, level=0).iloc[:, 0]
+                except Exception:
+                    s = px.select_dtypes(include=[np.number]).iloc[:, 0]
+        else:
+            if "Close" in px.columns:
+                s = px["Close"]
+            elif "Adj Close" in px.columns:
+                s = px["Adj Close"]
+            else:
+                s = px.select_dtypes(include=[np.number]).iloc[:, 0]
+
+        s = pd.to_numeric(s, errors="coerce")
+        s.name = out_name
+        return s
+
+    ypf_ars = _close_series("YPFD.BA", "YPF_ARS")
+    ypf_usd = _close_series("YPF", "YPF_USD")
+
+    df = pd.concat([ypf_ars, ypf_usd], axis=1, join="outer").sort_index()
+    df["CCL"] = df["YPF_ARS"] / df["YPF_USD"]
+    df = df.dropna(subset=["CCL"]).copy()
+
+    out = df[["CCL"]].reset_index()
+    if "Date" not in out.columns:
+        out = out.rename(columns={out.columns[0]: "Date"})
+    out["Date"] = pd.to_datetime(out["Date"], errors="coerce").dt.normalize()
+    out["CCL"] = pd.to_numeric(out["CCL"], errors="coerce")
+    out = out.dropna(subset=["Date", "CCL"]).sort_values("Date").reset_index(drop=True)
+    return out
 
 
 def render_macro_fx(go_to):
+
+    # =========================
+    # Botón volver (afuera del panel)
+    # =========================
     if st.button("← Volver"):
         go_to("macro_home")
 
     # =========================
-    # Estilos (solo formato)
+    # CSS (incluye el panel grande)
     # =========================
     st.markdown(
-        """
+        textwrap.dedent(
+            """
         <style>
-          .fx-header{
-            padding: 18px 18px 14px 18px;
-            border-radius: 18px;
-            background: rgba(255,255,255,0.55);
-            border: 1px solid rgba(17,24,39,0.06);
-            box-shadow: 0 10px 30px rgba(17,24,39,0.08);
-            backdrop-filter: blur(6px);
+          /* ===== HEADER ===== */
+          .fx-wrap{
+            background: linear-gradient(180deg, #f7fbff 0%, #eef6ff 100%);
+            border: 1px solid #dfeaf6;
+            border-radius: 22px;
+            padding: 12px;
+            box-shadow:
+              0 10px 24px rgba(15, 55, 100, 0.16),
+              inset 0 0 0 1px rgba(255,255,255,0.55);
           }
-          .fx-title{
-            font-size: 44px;
-            font-weight: 850;
-            letter-spacing: -0.02em;
-            color: #111827;
+
+          .fx-title-row{
             display:flex;
             align-items:center;
             gap: 12px;
-            margin: 0;
+            margin-bottom: 8px;
+            padding-left: 4px;
           }
-          .fx-icon{
-            width: 44px;
-            height: 44px;
-            border-radius: 16px;
+
+          .fx-icon-badge{
+            width: 64px;
+            height: 52px;
+            border-radius: 14px;
+            background: linear-gradient(180deg, #e7eef6 0%, #dfe7f1 100%);
+            border: 1px solid rgba(15,23,42,0.10);
             display:flex;
             align-items:center;
             justify-content:center;
-            background: rgba(59,130,246,0.12);
-            color: #1d4ed8;
+            box-shadow: 0 8px 14px rgba(15,55,100,0.12);
+            font-size: 32px;
+            flex: 0 0 auto;
+          }
+
+          .fx-title{
+            font-size: 23px;
             font-weight: 900;
-            font-size: 22px;
-          }
-          .fx-inline{
-            display:flex;
-            align-items: baseline;
-            gap: 14px;
-            flex-wrap: wrap;
-            margin-top: 6px;
-          }
-          .fx-pair{
-            font-size: 16px;
-            font-weight: 800;
-            color: #111827;
-            opacity: 0.92;
-          }
-          .fx-value{
-            font-size: 52px;
-            font-weight: 900;
-            letter-spacing: -0.03em;
-            color:#111827;
+            letter-spacing: -0.01em;
+            color: #14324f;
+            margin: 0;
             line-height: 1.0;
           }
-          .fx-sub{
-            margin-top: 8px;
-            font-size: 14px;
-            color: #6b7280;
+
+          .fx-card{
+            background: rgba(255,255,255,0.94);
+            border: 1px solid rgba(15, 23, 42, 0.10);
+            border-radius: 18px;
+            padding: 14px 14px 12px 14px;
+            box-shadow: 0 10px 18px rgba(15, 55, 100, 0.10);
           }
-          .fx-chips{
+
+          .fx-row{
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            column-gap: 14px;
+          }
+
+          .fx-value{
+            font-size: 46px;
+            font-weight: 950;
+            letter-spacing: -0.02em;
+            color: #14324f;
+            line-height: 0.95;
+          }
+
+          .fx-meta{
+            font-size: 13px;
+            color: #2b4660;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .fx-meta .sep{ opacity: 0.40; padding: 0 6px; }
+
+          .fx-pills{
             display:flex;
             gap: 10px;
-            flex-wrap: wrap;
-            margin-top: 10px;
+            justify-content: flex-end;
+            align-items: center;
+            white-space: nowrap;
           }
-          .fx-chip{
+
+          .fx-pill{
             display:inline-flex;
             align-items:center;
             gap: 8px;
-            padding: 8px 12px;
+            padding: 7px 10px;
             border-radius: 12px;
-            background: rgba(255,255,255,0.70);
-            border: 1px solid rgba(17,24,39,0.08);
-            font-size: 14px;
-            color:#111827;
+            border: 1px solid rgba(15,23,42,0.10);
+            font-size: 13px;
+            font-weight: 700;
+            box-shadow: 0 6px 10px rgba(15,55,100,0.08);
           }
-          .fx-chip b{ font-weight: 850; }
-          .fx-chip .up{ color:#047857; font-weight: 900; }
-          .fx-chip .down{ color:#b91c1c; font-weight: 900; }
+
+          .fx-pill .lab{ color:#2b4660; font-weight: 700; }
+
+          .fx-pill.red{
+            background: linear-gradient(180deg, rgba(220,38,38,0.08) 0%, rgba(220,38,38,0.05) 100%);
+          }
+          .fx-pill.green{
+            background: linear-gradient(180deg, rgba(22,163,74,0.10) 0%, rgba(22,163,74,0.06) 100%);
+          }
+
+          .fx-up{ color:#168a3a; font-weight: 900; }
+          .fx-down{ color:#cc2e2e; font-weight: 900; }
+
+          .fx-arrow{
+            width: 14px;
+            text-align:center;
+            font-weight: 900;
+          }
+
+          .fx-panel-title{
+            font-size: 12px;
+            font-weight: 900;
+            color: rgba(20,50,79,0.78);
+            margin: 0 0 6px 2px;
+            letter-spacing: 0.01em;
+          }
+
+          .fx-panel-gap{ height: 16px; }
+
+          /* ===============================
+             PANEL GRANDE REAL (aplicado por JS al contenedor de Streamlit)
+             =============================== */
+          .fx-panel-wrap{
+            background: rgba(230, 243, 255, 0.55);
+            border: 1px solid rgba(15, 55, 100, 0.10);
+            border-radius: 22px;
+            padding: 16px 16px 26px 16px; /* (3) + aire abajo */
+            box-shadow: 0 10px 18px rgba(15,55,100,0.06);
+            margin-top: 10px;
+          }
+
+          /* Evitar “cortes” visuales dentro del panel */
+          .fx-panel-wrap div[data-testid="stSelectbox"],
+          .fx-panel-wrap div[data-testid="stMultiSelect"],
+          .fx-panel-wrap div[data-testid="stSlider"],
+          .fx-panel-wrap div[data-testid="stPlotlyChart"],
+          .fx-panel-wrap div[data-testid="stDownloadButton"]{
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          /* Estilo combobox base (default) */
+          .fx-panel-wrap div[role="combobox"]{
+            border-radius: 16px !important;
+            border: 1px solid rgba(15,23,42,0.10) !important;
+            background: rgba(255,255,255,0.94) !important;
+            box-shadow: 0 10px 18px rgba(15, 55, 100, 0.08) !important;
+          }
+
+          /* (2) SELECTBOX "Medida" estilo chip (oscuro + texto azul) */
+          .fx-panel-wrap div[data-testid="stSelectbox"] div[role="combobox"]{
+            background: #0b2a55 !important;
+            border: 1px solid rgba(255,255,255,0.14) !important;
+            box-shadow: 0 10px 18px rgba(15, 55, 100, 0.10) !important;
+          }
+          .fx-panel-wrap div[data-testid="stSelectbox"] div[role="combobox"] *{
+            color: #8fc2ff !important;
+            fill: #8fc2ff !important;
+            font-weight: 800 !important;
+          }
+
+          /* Tags multiselect visibles (variable ya venía así) */
+          .fx-panel-wrap span[data-baseweb="tag"]{
+            background: #0b2a55 !important;
+            color: #ffffff !important;
+            border-radius: 10px !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+          }
+          .fx-panel-wrap span[data-baseweb="tag"] *{
+            color: #ffffff !important;
+            fill: #ffffff !important;
+          }
+
+          @media (max-width: 900px){
+            .fx-row{ grid-template-columns: 1fr; row-gap: 10px; }
+            .fx-meta{ white-space: normal; }
+            .fx-pills{ justify-content: flex-start; }
+          }
         </style>
-        """,
+        """
+        ),
         unsafe_allow_html=True,
     )
 
     # =========================
-    # Helpers
+    # Load data
     # =========================
-    def asof_fx(df_fx: pd.DataFrame, target_date: pd.Timestamp):
-        t = df_fx.dropna(subset=["Date", "FX"]).sort_values("Date")
-        t = t[t["Date"] <= target_date]
-        if t.empty:
-            return None, None
-        r = t.iloc[-1]
-        return float(r["FX"]), pd.to_datetime(r["Date"])
-
-    # =========================
-    # Carga datos
-    # =========================
-
-    #### NUEVO: frase mientras carga (se borra al terminar)
-    fact_ph = st.empty()
-    fact_ph.info("💡 " + random.choice(INDU_LOADING_PHRASES))
-    ####
+    fact = st.empty()
+    fact.info("💡 " + random.choice(INDU_LOADING_PHRASES))
 
     with st.spinner("Cargando datos..."):
-        fx = get_a3500()          # id=5
+        fx = get_a3500().copy()
+        fx["Date"] = pd.to_datetime(fx["Date"], errors="coerce").dt.normalize()
+        fx["FX"] = pd.to_numeric(fx["FX"], errors="coerce")
+        fx = (
+            fx.dropna(subset=["Date", "FX"])
+            .drop_duplicates(subset=["Date"])
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
         rem = get_rem_last()
-        ipc = get_ipc_bcra()      # id=27, % mensual en decimal
+        ipc = get_ipc_bcra()
 
         bands_2025 = build_bands_2025("2025-04-14", "2025-12-31", 1000.0, 1400.0)
         bands_2026 = build_bands_2026(bands_2025, rem, ipc)
@@ -154,463 +307,571 @@ def render_macro_fx(go_to):
             .sort_values("Date")
             .reset_index(drop=True)
         )
+        bands["Date"] = pd.to_datetime(bands["Date"], errors="coerce").dt.normalize()
+        bands = bands.dropna(subset=["Date", "lower", "upper"])
 
-        fx = fx.copy()
-        fx["Date"] = pd.to_datetime(fx["Date"], errors="coerce")
-        fx["FX"] = pd.to_numeric(fx["FX"], errors="coerce")
-        fx = (
-            fx.dropna(subset=["Date", "FX"])
-            .drop_duplicates(subset=["Date"])
-            .sort_values("Date")
-            .reset_index(drop=True)
-        )
+        ccl = get_ccl_yahoo()
 
-    #### NUEVO: limpiar mensaje cuando terminó la carga
-    fact_ph.empty()
-    ####
+    fact.empty()
 
     if fx.empty:
         st.warning("Sin datos del tipo de cambio.")
         return
 
     # =========================
-    # KPIs
+    # Helpers
     # =========================
-    last_date = pd.to_datetime(fx["Date"].iloc[-1])
-    last_fx = float(fx["FX"].iloc[-1])
+    def _asof(df_: pd.DataFrame, target: pd.Timestamp, col: str):
+        t = df_.dropna(subset=["Date", col]).sort_values("Date")
+        t = t[t["Date"] <= target]
+        if t.empty:
+            return None
+        return float(t[col].iloc[-1])
 
-    fx_m, _ = asof_fx(fx, last_date - pd.Timedelta(days=30))
-    fx_y, _ = asof_fx(fx, last_date - pd.Timedelta(days=365))
-
-    vm = None if fx_m is None else (last_fx / fx_m - 1) * 100
-    va = None if fx_y is None else (last_fx / fx_y - 1) * 100
+    def _arrow_cls(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return ("", "")
+        return ("▲", "fx-up") if v >= 0 else ("▼", "fx-down")
 
     # =========================
-    # DF diario histórico (para TODO real)
+    # Header dinámico según selección actual
+    # =========================
+    DEFAULT_VARS = ["TC Mayorista"]
+    vars_state = st.session_state.get("fx_vars", DEFAULT_VARS)
+    if not vars_state:
+        vars_state = ["TC Mayorista"]
+
+    header_var = "CCL" if (len(vars_state) == 1 and vars_state[0] == "CCL") else "TC Mayorista"
+
+    if header_var == "CCL" and not ccl.empty:
+        hdr_df = ccl.rename(columns={"CCL": "VAL"}).copy()
+        label_unidad = "ARS/USD"
+    else:
+        hdr_df = fx.rename(columns={"FX": "VAL"}).copy()
+        header_var = "TC Mayorista"
+        label_unidad = "ARS/USD"
+
+    last_date = pd.to_datetime(hdr_df["Date"].iloc[-1])
+    last_val = float(hdr_df["VAL"].iloc[-1])
+
+    val_m = _asof(hdr_df, last_date - pd.Timedelta(days=30), "VAL")
+    val_y = _asof(hdr_df, last_date - pd.Timedelta(days=365), "VAL")
+
+    vm = None if val_m is None else (last_val / val_m - 1) * 100
+    va = None if val_y is None else (last_val / val_y - 1) * 100
+
+    a_vm, cls_vm = _arrow_cls(vm)
+    a_va, cls_va = _arrow_cls(va)
+
+    vm_txt = safe_pct(vm, 1)
+    va_txt = safe_pct(va, 1)
+
+    # =========================================================
+    # PANEL GRANDE REAL: marker + JS que “marca” el contenedor
+    # =========================================================
+    st.markdown("<span id='fx_panel_marker'></span>", unsafe_allow_html=True)
+
+    components.html(
+        """
+        <script>
+        (function() {
+          function applyFxPanelClass() {
+            const marker = window.parent.document.getElementById('fx_panel_marker');
+            if (!marker) return;
+
+            const block = marker.closest('div[data-testid="stVerticalBlock"]');
+            if (block) block.classList.add('fx-panel-wrap');
+          }
+
+          applyFxPanelClass();
+
+          let tries = 0;
+          const t = setInterval(() => {
+            applyFxPanelClass();
+            tries += 1;
+            if (tries >= 10) clearInterval(t);
+          }, 150);
+
+          const obs = new MutationObserver(() => applyFxPanelClass());
+          obs.observe(window.parent.document.body, { childList: true, subtree: true });
+          setTimeout(() => obs.disconnect(), 3000);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+    # =========================
+    # HEADER
+    # =========================
+    header_lines = [
+        '<div class="fx-wrap">',
+        '  <div class="fx-title-row">',
+        '    <div class="fx-icon-badge">💵</div>',
+        '    <div class="fx-title">Tipo de cambio</div>',
+        "  </div>",
+        '  <div class="fx-card">',
+        '    <div class="fx-row">',
+        f'      <div class="fx-value">{int(round(last_val))}</div>',
+        '      <div class="fx-meta">',
+        f'        {header_var}<span class="sep">|</span>{label_unidad}<span class="sep">|</span>{last_date.strftime("%d/%m/%Y")}',
+        "      </div>",
+        '      <div class="fx-pills">',
+        '        <div class="fx-pill red">',
+        f'          <span class="fx-arrow {cls_vm}">{a_vm}</span>',
+        f'          <span class="{cls_vm}">{vm_txt}</span>',
+        '          <span class="lab">mensual</span>',
+        "        </div>",
+        '        <div class="fx-pill green">',
+        f'          <span class="fx-arrow {cls_va}">{a_va}</span>',
+        f'          <span class="{cls_va}">{va_txt}</span>',
+        '          <span class="lab">interanual</span>',
+        "        </div>",
+        "      </div>",
+        "    </div>",
+        "  </div>",
+        "</div>",
+    ]
+    st.markdown("\n".join(header_lines), unsafe_allow_html=True)
+
+    st.markdown("<div class='fx-panel-gap'></div>", unsafe_allow_html=True)
+
+    # =========================
+    # CONTROLES
+    # =========================
+    c1, c2 = st.columns(2, gap="large")
+
+    with c1:
+        st.markdown("<div class='fx-panel-title'>Seleccioná la medida</div>", unsafe_allow_html=True)
+        medida = st.selectbox(
+            "",
+            ["Nivel", "Variación acumulada"],
+            label_visibility="collapsed",
+            key="fx_medida",
+        )
+
+    with c2:
+        st.markdown("<div class='fx-panel-title'>Seleccioná la variable</div>", unsafe_allow_html=True)
+        variables = st.multiselect(
+            "",
+            options=["TC Mayorista", "CCL"],
+            default=DEFAULT_VARS,
+            label_visibility="collapsed",
+            key="fx_vars",
+        )
+
+    if not variables:
+        variables = ["TC Mayorista"]
+
+    # =========================
+    # MASTER DF
     # =========================
     fx_min = pd.to_datetime(fx["Date"].min())
-    bands_max = pd.to_datetime(bands["Date"].max()) if not bands.empty else last_date
-    full_end = max(last_date, bands_max)
+    last_fx_date = pd.to_datetime(fx["Date"].max())
+    last_ccl_date = pd.to_datetime(ccl["Date"].max()) if not ccl.empty else pd.NaT
+    bands_max = pd.to_datetime(bands["Date"].max()) if not bands.empty else pd.NaT
 
+    full_end = max(d for d in [last_fx_date, last_ccl_date, bands_max] if pd.notna(d))
     cal = pd.DataFrame({"Date": pd.date_range(fx_min, full_end, freq="D")})
 
     df = (
         cal.merge(fx, on="Date", how="left")
            .merge(bands, on="Date", how="left")
+           .merge(ccl, on="Date", how="left")
            .sort_values("Date")
            .reset_index(drop=True)
     )
 
-    # TC sin huecos SOLO hasta el último dato observado (después queda vacío)
-    last_fx_date = fx["Date"].max()
-
     df["FX"] = df["FX"].ffill()
     df.loc[df["Date"] > last_fx_date, "FX"] = np.nan
-
-    # Distancia a banda superior (solo si hay banda en last_date)
-    up_row = df.loc[df["Date"] == last_date, "upper"]
-    upper_last = float(up_row.iloc[0]) if (not up_row.empty and pd.notna(up_row.iloc[0])) else None
-
-    dist_to_upper = None
-    if upper_last is not None and last_fx > 0:
-        dist_to_upper = (upper_last / last_fx - 1) * 100
-
-    title_txt = ""
-    if dist_to_upper is not None:
-        title_txt = f"   El TC se encuentra a {safe_pct(dist_to_upper, 1)} de la banda superior"
+    df["CCL"] = df["CCL"].ffill()
+    if pd.notna(last_ccl_date):
+        df.loc[df["Date"] > last_ccl_date, "CCL"] = np.nan
 
     # =========================
-    # NUEVO LAYOUT (solo formato)
-    # - Header moderno
-    # - Selector de rango a la derecha
-    # - Gráfico full width (MISMO CONTENIDO, MISMOS EJES)
+    # Slider
     # =========================
+    cols_map = {"TC Mayorista": "FX", "CCL": "CCL"}
+    sel_cols = [cols_map[v] for v in variables]
 
-    # --- fila 1: header + selector rango
-    left, right = st.columns([3, 1], vertical_alignment="top")
+    mask_any = df[sel_cols].notna().any(axis=1)
+    s_min = df.loc[mask_any, "Date"].min()
+    s_max = df.loc[mask_any, "Date"].max()
 
-    with left:
-        # chips: signo para flecha
-        vm_txt = safe_pct(vm, 1)
-        va_txt = safe_pct(va, 1)
+    if medida == "Nivel" and pd.notna(bands_max):
+        s_max = max(s_max, bands_max)
 
-        # Determinar flecha por signo (solo estética)
-        def _chip_arrow(txt: str):
-            if txt is None:
-                return "", ""
-            t = str(txt).strip()
-            if t.startswith("-"):
-                return "▼", "down"
-            return "▲", "up"
+    min_d = s_min.date()
+    max_d = s_max.date()
+    default_start = max(min_d, (s_max - pd.Timedelta(days=365)).date())
 
-        a1, c1 = _chip_arrow(vm_txt)
-        a2, c2 = _chip_arrow(va_txt)
-
-        st.markdown(
-            f"""
-            <div class="fx-header">
-              <div class="fx-title">
-                <div class="fx-icon">$↗</div>
-                <div>Tipo de cambio</div>
-              </div>
-
-              <div class="fx-inline">
-                <div class="fx-pair">ARS/USD</div>
-                <div class="fx-value">{int(round(last_fx))}</div>
-              </div>
-
-              <div class="fx-sub">
-                Tipo de cambio oficial mayorista de referencia · Al {last_date.strftime('%d/%m/%Y')}
-              </div>
-
-              <div class="fx-chips">
-                <div class="fx-chip">
-                  <span class="{c1}">{a1}</span>
-                  <span><b>{vm_txt}</b> mensual</span>
-                </div>
-                <div class="fx-chip">
-                  <span class="{c2}">{a2}</span>
-                  <span><b>{va_txt}</b> interanual</span>
-                </div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with right:
-        # Selector rango (default 1A) - MISMO radio, mismas opciones, misma key
-        rango_map = {"6M": 180, "1A": 365, "2A": 365 * 2, "5A": 365 * 5, "TODO": None}
-
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        rango = st.radio(
-            label="",
-            options=list(rango_map.keys()),
-            index=1,  # 1A por defecto
-            horizontal=True,
-            label_visibility="collapsed",
-            key="fx_rango",
-        )
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-    # --- fila 2: gráfico + botón descargar (sin tocar contenido del gráfico)
-    # CSV con TC + bandas (igual que antes)
-    export = df[["Date", "FX", "lower", "upper"]].copy()
-    export = export.rename(
-        columns={
-            "Date": "date",
-            "FX": "tc_mayorista",
-            "lower": "banda_inferior",
-            "upper": "banda_superior",
-        }
+    st.markdown("<div class='fx-panel-title'>Rango de fechas</div>", unsafe_allow_html=True)
+    start_d, end_d = st.slider(
+        "",
+        min_value=min_d,
+        max_value=max_d,
+        value=(default_start, max_d),
+        label_visibility="collapsed",
+        key="fx_rangebar",
     )
-    csv_bytes = export.to_csv(index=False).encode("utf-8")
-    file_name = f"tc_bandas_{last_date.strftime('%Y-%m-%d')}.csv"
 
-    # --- armado df_plot (MISMA LÓGICA)
-    days = rango_map[rango]
-    if days is None:
-        min_date = fx_min
-    else:
-        min_date = max(fx_min, last_date - pd.Timedelta(days=days))
-
-    df_plot = df[df["Date"] >= min_date].copy()
-
-    # aire a la derecha (MISMO)
-    max_date = pd.to_datetime(df["Date"].max()) + pd.DateOffset(months=1)
+    df_plot = df[(df["Date"] >= pd.Timestamp(start_d)) & (df["Date"] <= pd.Timestamp(end_d))].copy()
+    if medida == "Nivel" and pd.notna(bands_max):
+        df_plot = df_plot[df_plot["Date"] <= bands_max]
 
     # =========================
-    # Gráfico (NO SE TOCA el contenido ni ejes)
+    # PLOT
     # =========================
     fig = go.Figure()
 
-    # Bandas
-    fig.add_trace(
-        go.Scatter(
-            x=df_plot["Date"],
-            y=df_plot["upper"],
-            name="Banda superior",
-            line=dict(dash="dash"),
-            hovertemplate="%{x|%d/%m/%Y}<br>Banda superior: %{y:.0f}<extra></extra>",
+    # (1) Bandas más claras
+    band_line = "rgba(35, 120, 200, 0.55)"
+    band_fill = "rgba(35, 120, 200, 0.08)"
+
+    if medida == "Nivel" and not bands.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=df_plot["Date"],
+                y=df_plot["upper"],
+                name="Banda superior",
+                line=dict(dash="dash", color=band_line),
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df_plot["Date"],
-            y=df_plot["lower"],
-            name="Banda inferior",
-            line=dict(dash="dash"),
-            fill="tonexty",
-            fillcolor="rgba(0,0,0,0.08)",
-            hovertemplate="%{x|%d/%m/%Y}<br>Banda inferior: %{y:.0f}<extra></extra>",
+        fig.add_trace(
+            go.Scatter(
+                x=df_plot["Date"],
+                y=df_plot["lower"],
+                name="Banda inferior",
+                line=dict(dash="dash", color=band_line),
+                fill="tonexty",
+                fillcolor=band_fill,
+            )
         )
-    )
 
-    # TC
-    fig.add_trace(
-        go.Scatter(
-            x=df_plot["Date"],
-            y=df_plot["FX"],
-            name="TC mayorista",
-            mode="lines",
-            connectgaps=True,
-            hovertemplate="%{x|%d/%m/%Y}<br>TC mayorista: %{y:.2f}<extra></extra>",
-        )
-    )
+    for v in variables:
+        col = cols_map[v]
+        y = df_plot[col]
 
-    # ticks en español (MISMO)
-    mes_es = {
-        1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
-        7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
-    }
+        if medida == "Variación acumulada":
+            base = y.dropna().iloc[0]
+            y = (y / base - 1) * 100
+            fig.add_trace(go.Scatter(x=df_plot["Date"], y=y, name=v, mode="lines", hovertemplate="%{x|%d/%m/%Y}<br>Variación acumulada: %{y:.2f}%<extra></extra>"))
+        else:
+            fig.add_trace(go.Scatter(x=df_plot["Date"], y=y, name=v, mode="lines"))
 
-    # En TODO: etiquetas cada 6 meses; resto cada 2 meses (MISMO)
-    tick_freq = "6MS" if rango == "TODO" else "2MS"
-    tickvals = pd.date_range(min_date.normalize(), max_date.normalize(), freq=tick_freq)
-    ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
+    fig.update_layout(height=520, hovermode="x", margin=dict(l=10, r=10, t=10, b=40), legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1.0), dragmode=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
-    # Layout (MISMO que tenías; solo afuera movimos el header)
-    fig.update_layout(
-        hovermode="x",
-        height=600,
-        margin=dict(l=10, r=10, t=90, b=60),
-        showlegend=True,
-        title=dict(text=title_txt, x=0, xanchor="left"),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1.0,
-            font=dict(size=12),
-        ),
-    )
-
-    fig.update_xaxes(
-        title_text="",
-        range=[min_date, max_date],
-        tickmode="array",
-        tickvals=tickvals,
-        ticktext=ticktext,
-    )
-    fig.update_yaxes(title_text="")
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Botón descargar (abajo, izquierda) - solo formato alrededor, contenido igual
+    # =========================
+    # CSV + Fuente
+    # =========================
     st.download_button(
-        label="⬇️ Descargar CSV",
-        data=csv_bytes,
-        file_name=file_name,
+        "⬇️ Descargar CSV",
+        df_plot.to_csv(index=False).encode("utf-8"),
+        file_name="tc.csv",
         mime="text/csv",
-        use_container_width=False,
     )
 
     st.markdown(
-        "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
-        "Fuente: Banco Central de la República Argentina."
+        "<div style='color:rgba(20,50,79,0.70); font-size:12px;'>"
+        "Fuente: CEU-UIA en base a BCRA y Yahoo Finance."
         "</div>",
         unsafe_allow_html=True,
     )
 
     # =========================================================
-    # TIPO DE CAMBIO REAL (ITCRM + bilaterales)
+    # TIPO DE CAMBIO REAL (ITCRM + bilaterales) — FORMATO NUEVO
     # =========================================================
     st.divider()
-    st.markdown("### 🌍 Tipo de cambio real multilateral y bilaterales")
-    st.caption("ITCRM y tipos de cambio reales bilaterales (100=17-dic-15)")
 
     with st.spinner("Cargando ITCRM..."):
         tcr_long = get_itcrm_excel_long()
 
-    if tcr_long.empty:
+    if tcr_long is None or tcr_long.empty:
         st.warning("Sin datos de ITCRM.")
-        return
+    else:
+        # Normalización mínima
+        tcr_long = tcr_long.copy()
+        tcr_long["Date"] = pd.to_datetime(tcr_long["Date"], errors="coerce").dt.normalize()
+        tcr_long["Value"] = pd.to_numeric(tcr_long["Value"], errors="coerce")
+        tcr_long["Serie"] = tcr_long["Serie"].astype(str)
+        tcr_long = tcr_long.dropna(subset=["Date", "Serie", "Value"]).sort_values("Date")
 
-    # -------------------------
-    # Series disponibles
-    # -------------------------
-    series_all = sorted(tcr_long["Serie"].dropna().unique().tolist())
+        preferred = ["ITCRM ", "ITCRB Brasil", "ITCRB Estados Unidos", "ITCRB China"]
+        series_all = tcr_long["Serie"].dropna().unique().tolist()
 
-    default_sel = ["ITCRM"] if "ITCRM" in series_all else ([series_all[0]] if series_all else [])
+        options = [s for s in preferred if s in series_all]
+        options += [s for s in sorted(series_all) if s not in options]
 
-    # -------------------------
-    # Selector de series (1 fila – 4 columnas)
-    # -------------------------
-    st.markdown("**Seleccionar series**")
+        if not options:
+            st.warning("No se encontraron series de ITCRM en el Excel.")
+        else:
+            st.markdown("<div class='tcr-panel-start'></div>", unsafe_allow_html=True)
 
-    # Usamos los nombres EXACTOS del Excel (incluido el espacio en ITCRM )
-    series_focus = ["ITCRM ", "ITCRB Brasil", "ITCRB Estados Unidos", "ITCRB China"]
+            # --- CSS del panel TCR (solo (3): + aire abajo)
+            st.markdown(
+                """
+                <style>
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start){
+                    background: rgba(230, 243, 255, 0.55);
+                    border: 1px solid rgba(15, 55, 100, 0.10);
+                    border-radius: 22px;
+                    padding: 14px 14px 26px 14px; /* (3) + aire abajo */
+                    box-shadow: 0 10px 18px rgba(15,55,100,0.06);
+                    margin-top: 10px;
+                }
 
-    cols = st.columns(4)
-    sel_series = []
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stSelectbox"],
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stMultiSelect"],
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stSlider"],
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stPlotlyChart"],
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stDownloadButton"]{
+                    background: transparent !important;
+                    border: none !important;
+                    box-shadow: none !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                }
 
-    for col, s in zip(cols, series_focus):
-        with col:
-            if st.checkbox(
-                s,
-                value=(s == "ITCRM "),  # default ITCRM (con espacio)
-                key=f"itcrm_cb_{s}"
-            ):
-                sel_series.append(s)
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[role="combobox"]{
+                    border-radius: 16px !important;
+                    border: 1px solid rgba(15,23,42,0.10) !important;
+                    background: rgba(255,255,255,0.94) !important;
+                    box-shadow: 0 10px 18px rgba(15, 55, 100, 0.08) !important;
+                }
 
-    if not sel_series:
-        st.info("Seleccioná al menos una serie para ver el gráfico.")
-        return
+                /* (2) Selectbox medida también “chip” en TCR */
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stSelectbox"] div[role="combobox"]{
+                    background: #0b2a55 !important;
+                    border: 1px solid rgba(255,255,255,0.14) !important;
+                }
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stSelectbox"] div[role="combobox"] *{
+                    color: #8fc2ff !important;
+                    fill: #8fc2ff !important;
+                    font-weight: 800 !important;
+                }
 
-    # -------------------------
-    # Data filtrada
-    # -------------------------
-    tcr = tcr_long[tcr_long["Serie"].isin(sel_series)].copy().sort_values("Date")
-
-    # Serie principal = primera seleccionada
-    main_series = sel_series[0]
-    tcr_main = (
-        tcr_long[tcr_long["Serie"] == main_series]
-        .sort_values("Date")
-        .reset_index(drop=True)
-    )
-
-    last_tcr_date = pd.to_datetime(tcr_main["Date"].iloc[-1])
-    last_tcr_val = float(tcr_main["Value"].iloc[-1])
-
-    # As-of helpers (consistente con TC nominal)
-    def asof_value(df_: pd.DataFrame, target_date: pd.Timestamp):
-        tt = df_.dropna(subset=["Date", "Value"]).sort_values("Date")
-        tt = tt[tt["Date"] <= target_date]
-        if tt.empty:
-            return None, None
-        rr = tt.iloc[-1]
-        return float(rr["Value"]), pd.to_datetime(rr["Date"])
-
-    tcr_m, _ = asof_value(tcr_main, last_tcr_date - pd.Timedelta(days=30))
-    tcr_y, _ = asof_value(tcr_main, last_tcr_date - pd.Timedelta(days=365))
-
-    vm_tcr = None if tcr_m is None else (last_tcr_val / tcr_m - 1) * 100
-    va_tcr = None if tcr_y is None else (last_tcr_val / tcr_y - 1) * 100
-
-    # -------------------------
-    # Layout KPI + gráfico
-    # -------------------------
-    kpi2_col, chart2_col = st.columns([1, 3], vertical_alignment="top")
-
-    with kpi2_col:
-        st.markdown(
-            f"""
-            <div style="font-size:46px; font-weight:800; line-height:1.0;">
-              <span style="font-size:16px; font-weight:700; color:#111827;">{main_series}</span>
-              {last_tcr_val:.1f}
-            </div>
-            """.replace(".", ","),
-            unsafe_allow_html=True,
-        )
-        st.caption(f"Fecha: {last_tcr_date.strftime('%d/%m/%Y')}")
-
-        st.markdown(
-            f"<div style='font-size:18px; margin-top:14px;'><b>% mensual:</b> {safe_pct(vm_tcr, 1)}</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f"<div style='font-size:18px; margin-top:8px;'><b>% anual:</b> {safe_pct(va_tcr, 1)}</div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-
-        # CSV export
-        export_tcr = (
-            tcr.pivot_table(index="Date", columns="Serie", values="Value", aggfunc="last")
-            .sort_index()
-            .reset_index()
-            .rename(columns={"Date": "date"})
-        )
-        csv_bytes_tcr = export_tcr.to_csv(index=False).encode("utf-8")
-        file_name_tcr = f"itcrm_{last_tcr_date.strftime('%Y-%m-%d')}.csv"
-
-        st.download_button(
-            label="⬇️ Descargar CSV",
-            data=csv_bytes_tcr,
-            file_name=file_name_tcr,
-            mime="text/csv",
-            key="dl_itcrm_csv",
-        )
-
-    with chart2_col:
-        # Selector rango (TODO por default)
-        rango_map2 = {"6M": 180, "1A": 365, "2A": 365 * 2, "5A": 365 * 5, "TODO": None}
-
-        rango2 = st.radio(
-            label="",
-            options=list(rango_map2.keys()),
-            index=list(rango_map2.keys()).index("TODO"),
-            horizontal=True,
-            label_visibility="collapsed",
-            key="itcrm_rango",
-        )
-
-        days2 = rango_map2[rango2]
-        tcr_min = pd.to_datetime(tcr["Date"].min())
-        tcr_last = pd.to_datetime(tcr["Date"].max())
-
-        min_date2 = tcr_min if days2 is None else max(tcr_min, tcr_last - pd.Timedelta(days=days2))
-        tcr_plot = tcr[tcr["Date"] >= min_date2].copy()
-
-        max_date2 = tcr_last + pd.DateOffset(months=1)
-
-        fig2 = go.Figure()
-
-        for s in sel_series:
-            ss = tcr_plot[tcr_plot["Serie"] == s]
-            fig2.add_trace(
-                go.Scatter(
-                    x=ss["Date"],
-                    y=ss["Value"],
-                    name=s,
-                    mode="lines",
-                    connectgaps=True,
-                    hovertemplate="%{x|%d/%m/%Y}<br>%{y:.2f}<extra></extra>",
-                )
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stMultiSelect"] span[data-baseweb="tag"]{
+                    background: #0b2a55 !important;
+                    color: #ffffff !important;
+                    border-radius: 10px !important;
+                    border: 1px solid rgba(255,255,255,0.12) !important;
+                }
+                section.main div[data-testid="stVerticalBlock"]:has(.tcr-panel-start)
+                div[data-testid="stMultiSelect"] span[data-baseweb="tag"] *{
+                    color: #ffffff !important;
+                    fill: #ffffff !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
             )
 
-        mes_es = {
-            1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
-            7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
-        }
+            default_main = "ITCRM " if "ITCRM " in options else (options[0] if options else "")
+            default_tcr_vars = st.session_state.get("tcr_vars", [default_main])
 
-        tick_freq2 = "6MS" if rango2 == "TODO" else "2MS"
-        tickvals2 = pd.date_range(min_date2.normalize(), max_date2.normalize(), freq=tick_freq2)
-        ticktext2 = [f"{mes_es[d.month]} {d.year}" for d in tickvals2]
+            if "tcr_medida" not in st.session_state:
+                st.session_state["tcr_medida"] = "Nivel"
 
-        fig2.update_layout(
-            hovermode="x",
-            height=520,
-            margin=dict(l=10, r=10, t=30, b=60),
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1.0,
-                font=dict(size=12),
-            ),
-        )
+            def _asof_tcr(df_: pd.DataFrame, target: pd.Timestamp):
+                tt = df_.dropna(subset=["Date", "Value"]).sort_values("Date")
+                tt = tt[tt["Date"] <= target]
+                if tt.empty:
+                    return None
+                return float(tt["Value"].iloc[-1])
 
-        fig2.update_xaxes(
-            title_text="",
-            range=[min_date2, max_date2],
-            tickmode="array",
-            tickvals=tickvals2,
-            ticktext=ticktext2,
-        )
-        fig2.update_yaxes(title_text="")
+            tcr_vars_now = st.session_state.get("tcr_vars", [default_main])
+            if not tcr_vars_now:
+                tcr_vars_now = [default_main]
+            main_series = tcr_vars_now[0]
 
-        st.plotly_chart(fig2, use_container_width=True)
+            tcr_main = tcr_long[tcr_long["Serie"] == main_series].sort_values("Date")
+            last_tcr_date = pd.to_datetime(tcr_main["Date"].iloc[-1]) if not tcr_main.empty else pd.NaT
+            last_tcr_val = float(tcr_main["Value"].iloc[-1]) if not tcr_main.empty else np.nan
 
-        st.markdown(
-            "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
-            "Fuente: BCRA — ITCRMSerie.xlsx."
-            "</div>",
-            unsafe_allow_html=True,
-        )
+            vm_tcr = None
+            va_tcr = None
+            if pd.notna(last_tcr_date) and pd.notna(last_tcr_val):
+                m = _asof_tcr(tcr_main, last_tcr_date - pd.Timedelta(days=30))
+                y = _asof_tcr(tcr_main, last_tcr_date - pd.Timedelta(days=365))
+                vm_tcr = None if m is None else (last_tcr_val / m - 1) * 100
+                va_tcr = None if y is None else (last_tcr_val / y - 1) * 100
+
+            a_vm2, cls_vm2 = _arrow_cls(vm_tcr)
+            a_va2, cls_va2 = _arrow_cls(va_tcr)
+            vm2_txt = safe_pct(vm_tcr, 1)
+            va2_txt = safe_pct(va_tcr, 1)
+
+            header2_lines = [
+                '<div class="fx-wrap">',
+                '  <div class="fx-title-row">',
+                '    <div class="fx-icon-badge">🌍</div>',
+                '    <div class="fx-title">Tipo de cambio real</div>',
+                "  </div>",
+                '  <div class="fx-card">',
+                '    <div class="fx-row">',
+                f'      <div class="fx-value">{(f"{last_tcr_val:.1f}".replace(".", ",")) if pd.notna(last_tcr_val) else "—"}</div>',
+                '      <div class="fx-meta">',
+                f'        {main_series}<span class="sep">|</span>Índice (100=17-dic-15)<span class="sep">|</span>{last_tcr_date.strftime("%d/%m/%Y") if pd.notna(last_tcr_date) else ""}',
+                "      </div>",
+                '      <div class="fx-pills">',
+                '        <div class="fx-pill red">',
+                f'          <span class="fx-arrow {cls_vm2}">{a_vm2}</span>',
+                f'          <span class="{cls_vm2}">{vm2_txt}</span>',
+                '          <span class="lab">mensual</span>',
+                "        </div>",
+                '        <div class="fx-pill green">',
+                f'          <span class="fx-arrow {cls_va2}">{a_va2}</span>',
+                f'          <span class="{cls_va2}">{va2_txt}</span>',
+                '          <span class="lab">interanual</span>',
+                "        </div>",
+                "      </div>",
+                "    </div>",
+                "  </div>",
+                "</div>",
+            ]
+            st.markdown("\n".join(header2_lines), unsafe_allow_html=True)
+
+            st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+
+            c1, c2 = st.columns(2, gap="large")
+
+            with c1:
+                st.markdown("<div class='fx-panel-title'>Seleccioná la medida</div>", unsafe_allow_html=True)
+                tcr_medida = st.selectbox(
+                    "",
+                    ["Nivel", "Variación acumulada"],
+                    index=0 if st.session_state.get("tcr_medida", "Nivel") == "Nivel" else 1,
+                    label_visibility="collapsed",
+                    key="tcr_medida",
+                )
+
+            with c2:
+                st.markdown("<div class='fx-panel-title'>Seleccioná la variable</div>", unsafe_allow_html=True)
+                tcr_vars = st.multiselect(
+                    "",
+                    options=options,
+                    default=default_tcr_vars,
+                    label_visibility="collapsed",
+                    key="tcr_vars",
+                )
+
+            if not tcr_vars:
+                tcr_vars = [default_main]
+                st.session_state["tcr_vars"] = tcr_vars
+
+            tcr_min = pd.to_datetime(tcr_long["Date"].min())
+            tcr_max = pd.to_datetime(tcr_long["Date"].max())
+
+            cal2 = pd.DataFrame({"Date": pd.date_range(tcr_min, tcr_max, freq="D")})
+
+            wide = (
+                tcr_long.pivot_table(index="Date", columns="Serie", values="Value", aggfunc="last")
+                .sort_index()
+                .reset_index()
+            )
+
+            df2 = cal2.merge(wide, on="Date", how="left").sort_values("Date").reset_index(drop=True)
+
+            for s in options:
+                if s in df2.columns:
+                    last_s_date = tcr_long.loc[tcr_long["Serie"] == s, "Date"].max()
+                    df2[s] = pd.to_numeric(df2[s], errors="coerce").ffill()
+                    df2.loc[df2["Date"] > pd.to_datetime(last_s_date), s] = np.nan
+
+            sel_cols2 = [s for s in tcr_vars if s in df2.columns]
+            mask_any2 = df2[sel_cols2].notna().any(axis=1) if sel_cols2 else (df2["Date"].notna())
+
+            s_min2 = df2.loc[mask_any2, "Date"].min()
+            s_max2 = df2.loc[mask_any2, "Date"].max()
+
+            if pd.isna(s_min2) or pd.isna(s_max2):
+                s_min2, s_max2 = tcr_min, tcr_max
+
+            min_date2 = pd.to_datetime(s_min2).date()
+            max_date2 = pd.to_datetime(s_max2).date()
+
+            default_start2 = (pd.to_datetime(s_max2) - pd.Timedelta(days=365)).date()
+            if default_start2 < min_date2:
+                default_start2 = min_date2
+
+            st.markdown("<div class='fx-panel-title'>Rango de fechas</div>", unsafe_allow_html=True)
+            start2, end2 = st.slider(
+                label="",
+                min_value=min_date2,
+                max_value=max_date2,
+                value=(default_start2, max_date2),
+                format="YYYY-MM-DD",
+                label_visibility="collapsed",
+                key="tcr_rangebar",
+            )
+
+            df2_plot = df2[(df2["Date"] >= pd.Timestamp(start2)) & (df2["Date"] <= pd.Timestamp(end2))].copy()
+
+            fig2 = go.Figure()
+
+            if tcr_medida == "Variación acumulada":
+                hover2 = "%{x|%d/%m/%Y}<br>Variación acumulada: %{y:.2f}%<extra></extra>"
+                y_title2 = "%"
+            else:
+                hover2 = "%{x|%d/%m/%Y}<br>Valor: %{y:.2f}<extra></extra>"
+                y_title2 = ""
+
+            for s in tcr_vars:
+                if s not in df2_plot.columns:
+                    continue
+                y = df2_plot[s].copy()
+
+                if tcr_medida == "Variación acumulada":
+                    base_series = y.dropna()
+                    base = float(base_series.iloc[0]) if not base_series.empty else np.nan
+                    y_plot = (y / base - 1) * 100
+                    name = f"{s} (var. acum.)"
+                else:
+                    y_plot = y
+                    name = s
+
+                fig2.add_trace(
+                    go.Scatter(
+                        x=df2_plot["Date"],
+                        y=y_plot,
+                        name=name,
+                        mode="lines",
+                        connectgaps=True,
+                        hovertemplate=hover2,
+                    )
+                )
+
+            fig2.update_layout(height=520, hovermode="x", margin=dict(l=10, r=10, t=10, b=40), showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0), dragmode=False)
+
+            st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
+
+
+
+            export2 = df2_plot[["Date"] + [s for s in tcr_vars if s in df2_plot.columns]].copy()
+            export2 = export2.rename(columns={"Date": "date"})
+
+            st.download_button(
+                label="⬇️ Descargar CSV",
+                data=export2.to_csv(index=False).encode("utf-8"),
+                file_name=f"tcr_{pd.Timestamp(end2).strftime('%Y-%m-%d')}.csv",
+                mime="text/csv",
+                use_container_width=False,
+                key="dl_tcr_csv",
+            )
+
+            st.markdown(
+                "<div style='color:rgba(20,50,79,0.70); font-size:12px; margin-top:10px;'>"
+                "Fuente: BCRA — ITCRMSerie.xlsx."
+                "</div>",
+                unsafe_allow_html=True,
+            )
