@@ -466,7 +466,7 @@ def render_macro_tasa(go_to):
             "  </div>",
             '  <div class="fx-card">',
             '    <div class="fx-row">',
-            f'      <div class="fx-value">{_fmt_pct_es(last_val, 1) if pd.notna(last_val) else "—"}</div>',
+            f'      <div class="fx-value">{_fmt_pct_es(last_val, 1)}%</div>' if pd.notna(last_val) else '      <div class="fx-value">—</div>',
             '      <div class="fx-meta">',
             f'        {base_name}<span class="sep">|</span>{unidad}<span class="sep">|</span>{pd.to_datetime(last_date).strftime("%d/%m/%Y")}',
             "      </div>",
