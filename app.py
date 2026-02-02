@@ -37,7 +37,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 # ----------------------------
 st.set_page_config(
     page_title="Monitor CEU–UIA",
-    page_icon="📊",
+    page_icon="assets/ok.png",
     layout="wide",
     initial_sidebar_state="collapsed",
 )

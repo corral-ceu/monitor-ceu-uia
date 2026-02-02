@@ -1,15 +1,17 @@
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-
-#### NUEVO: para elegir una frase aleatoria
+import numpy as np
 import random
-####
-
+import textwrap
+import streamlit.components.v1 as components
 from services.macro_data import get_monetaria_serie
+from ui.common import safe_pct   # 👈 ESTA LÍNEA
 
 
-#### NUEVO: pool de frases (se muestra UNA sola)
+# ============================================================
+# Frases (loading)
+# ============================================================
 INDU_LOADING_PHRASES = [
     "La industria aporta más del 18% del valor agregado de la economía argentina.",
     "La industria es el segundo mayor empleador privado del país.",
@@ -17,23 +19,49 @@ INDU_LOADING_PHRASES = [
     "Los salarios industriales son 23% más altos que el promedio privado.",
     "Dos tercios de las exportaciones argentinas provienen de la industria.",
 ]
-####
 
 
+# ============================================================
+# Helpers
+# ============================================================
 def _fmt_pct_es(x: float, dec: int = 1) -> str:
-    return f"{x:.{dec}f}".replace(".", ",")
+    try:
+        return f"{float(x):.{dec}f}".replace(".", ",")
+    except Exception:
+        return "—"
+
+
+def _fmt_pp_es(x: float, dec: int = 1) -> str:
+    try:
+        return f"{float(x):.{dec}f}".replace(".", ",") + " pp"
+    except Exception:
+        return "—"
+
+
+def _arrow_cls(v):
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return ("", "")
+    return ("▲", "fx-up") if v >= 0 else ("▼", "fx-down")
+
+
+def _asof(df_: pd.DataFrame, target: pd.Timestamp, col: str):
+    t = df_.dropna(subset=["Date", col]).sort_values("Date")
+    t = t[t["Date"] <= target]
+    if t.empty:
+        return None
+    return float(t[col].iloc[-1])
 
 
 def _rem29_to_daily(df_m: pd.DataFrame) -> pd.DataFrame:
-    """REM 29 mensual -> diario (valor mensual repetido cada día del mes)."""
+    """REM mensual -> diario (valor mensual repetido y ffill)."""
     if df_m is None or df_m.empty:
         return pd.DataFrame(columns=["Date", "value"])
 
-    df_m = (
-        df_m.dropna(subset=["Date", "value"])
-        .sort_values("Date")
-        .reset_index(drop=True)
-    )
+    df_m = df_m.copy()
+    df_m["Date"] = pd.to_datetime(df_m["Date"], errors="coerce").dt.normalize()
+    df_m["value"] = pd.to_numeric(df_m["value"], errors="coerce")
+    df_m = df_m.dropna(subset=["Date", "value"]).sort_values("Date")
+
     df_m["Period"] = df_m["Date"].dt.to_period("M")
     df_m = df_m.drop_duplicates("Period", keep="last")
 
@@ -44,262 +72,789 @@ def _rem29_to_daily(df_m: pd.DataFrame) -> pd.DataFrame:
     cal["Period"] = cal["Date"].dt.to_period("M")
 
     out = cal.merge(df_m[["Period", "value"]], on="Period", how="left").drop(columns=["Period"])
+    out["value"] = out["value"].ffill()
     return out
 
 
-def _title_line(nombre: str, tasa_val: float, infl_val: float) -> str:
-    pos = "por encima" if tasa_val > infl_val else "por debajo"
+def _extend_daily_ffill(df_daily: pd.DataFrame, end_date: pd.Timestamp) -> pd.DataFrame:
+    """Extiende REM diario hasta end_date con ffill del último dato."""
+    if df_daily is None or df_daily.empty:
+        return pd.DataFrame({"Date": [end_date], "value": [np.nan]})
 
-    if nombre == "Adelantos":
-        desc = "adelantos en cuenta corriente"
-    elif nombre == "Préstamos Personales":
-        desc = "préstamos personales"
-    else:
-        desc = "plazo fijo"
+    df_daily = df_daily.copy()
+    df_daily["Date"] = pd.to_datetime(df_daily["Date"], errors="coerce").dt.normalize()
+    df_daily["value"] = pd.to_numeric(df_daily["value"], errors="coerce")
+    df_daily = df_daily.dropna(subset=["Date"]).sort_values("Date")
 
-    return (
-        f"<b>{nombre}:</b> La tasa de {desc} ({_fmt_pct_es(tasa_val, 1)}%) "
-        f"se encuentra {pos} de la inflación esperada ({_fmt_pct_es(infl_val, 1)}%)"
-    )
+    last_date = df_daily["Date"].max()
+    if end_date <= last_date:
+        return df_daily
+
+    cal = pd.DataFrame({"Date": pd.date_range(df_daily["Date"].min(), end_date, freq="D")})
+    out = cal.merge(df_daily, on="Date", how="left")
+    out["value"] = out["value"].ffill()
+    return out
 
 
+# ============================================================
+# Main
+# ============================================================
 def render_macro_tasa(go_to):
+
+    # =========================
+    # Volver (afuera del panel)
+    # =========================
     if st.button("← Volver"):
         go_to("macro_home")
 
-    st.markdown("## 📈 Tasa de interés")
-    st.caption("Seleccioná una o más tasas (% TNA) y comparalas con la inflación esperada (REM, 12m).")
-    st.divider()
-
-    # --- CSS para que el multiselect se lea bien (chips + fondo claro) ---
+    # =========================
+    # CSS (idéntico look & feel FX)
+    # =========================
     st.markdown(
-        """
+        textwrap.dedent(
+            """
         <style>
-          /* ancho max del selector */
-          div[data-testid="stMultiSelect"] { max-width: 420px; }
-
-          /* caja del input */
-          div[data-testid="stMultiSelect"] div[class*="control"] {
-            background: #ffffff !important;
-            border-color: #cbd5e1 !important;
+          /* ===== HEADER ===== */
+          .fx-wrap{
+            background: linear-gradient(180deg, #f7fbff 0%, #eef6ff 100%);
+            border: 1px solid #dfeaf6;
+            border-radius: 22px;
+            padding: 12px;
+            box-shadow:
+              0 10px 24px rgba(15, 55, 100, 0.16),
+              inset 0 0 0 1px rgba(255,255,255,0.55);
           }
 
-          /* texto general del multiselect */
-          div[data-testid="stMultiSelect"] * {
-            color: #0f172a !important;
+          .fx-title-row{
+            display:flex;
+            align-items:center;
+            gap: 12px;
+            margin-bottom: 8px;
+            padding-left: 4px;
           }
 
-          /* chips seleccionados */
-          div[data-testid="stMultiSelect"] span[data-baseweb="tag"] {
-            background-color: #e2e8f0 !important;
-            border: 1px solid #cbd5e1 !important;
+          .fx-icon-badge{
+            width: 64px;
+            height: 52px;
+            border-radius: 14px;
+            background: linear-gradient(180deg, #e7eef6 0%, #dfe7f1 100%);
+            border: 1px solid rgba(15,23,42,0.10);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            box-shadow: 0 8px 14px rgba(15,55,100,0.12);
+            font-size: 32px;
+            flex: 0 0 auto;
           }
 
-          /* texto dentro del chip */
-          div[data-testid="stMultiSelect"] span[data-baseweb="tag"] span {
-            color: #0f172a !important;
-            font-weight: 600 !important;
+          .fx-title{
+            font-size: 23px;
+            font-weight: 900;
+            letter-spacing: -0.01em;
+            color: #14324f;
+            margin: 0;
+            line-height: 1.0;
+          }
+
+          .fx-card{
+            background: rgba(255,255,255,0.94);
+            border: 1px solid rgba(15, 23, 42, 0.10);
+            border-radius: 18px;
+            padding: 14px 14px 12px 14px;
+            box-shadow: 0 10px 18px rgba(15, 55, 100, 0.10);
+          }
+
+          .fx-row{
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            column-gap: 14px;
+          }
+
+          .fx-value{
+            font-size: 46px;
+            font-weight: 950;
+            letter-spacing: -0.02em;
+            color: #14324f;
+            line-height: 0.95;
+          }
+
+          .fx-meta{
+            font-size: 13px;
+            color: #2b4660;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .fx-meta .sep{ opacity: 0.40; padding: 0 6px; }
+
+          .fx-pills{
+            display:flex;
+            gap: 10px;
+            justify-content: flex-end;
+            align-items: center;
+            white-space: nowrap;
+          }
+
+          .fx-pill{
+            display:inline-flex;
+            align-items:center;
+            gap: 8px;
+            padding: 7px 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(15,23,42,0.10);
+            font-size: 13px;
+            font-weight: 700;
+            box-shadow: 0 6px 10px rgba(15,55,100,0.08);
+          }
+
+          .fx-pill.red{
+            background: linear-gradient(180deg, rgba(220,38,38,0.08) 0%, rgba(220,38,38,0.05) 100%);
+          }
+          .fx-pill.green{
+            background: linear-gradient(180deg, rgba(22,163,74,0.10) 0%, rgba(22,163,74,0.06) 100%);
+          }
+
+          .fx-up{ color:#168a3a; font-weight: 900; }
+          .fx-down{ color:#cc2e2e; font-weight: 900; }
+
+          .fx-arrow{
+            width: 14px;
+            text-align:center;
+            font-weight: 900;
+          }
+
+          .fx-panel-title{
+            font-size: 12px;
+            font-weight: 900;
+            color: rgba(20,50,79,0.78);
+            margin: 0 0 6px 2px;
+            letter-spacing: 0.01em;
+          }
+
+          .fx-panel-gap{ height: 16px; }
+
+          /* ===============================
+             PANEL GRANDE REAL (aplicado por JS al contenedor de Streamlit)
+             =============================== */
+          .fx-panel-wrap{
+            background: rgba(230, 243, 255, 0.55);
+            border: 1px solid rgba(15, 55, 100, 0.10);
+            border-radius: 22px;
+            padding: 16px 16px 26px 16px;
+            box-shadow: 0 10px 18px rgba(15,55,100,0.06);
+            margin-top: 10px;
+          }
+
+          /* Evitar “cortes” visuales dentro del panel */
+          .fx-panel-wrap div[data-testid="stSelectbox"],
+          .fx-panel-wrap div[data-testid="stMultiSelect"],
+          .fx-panel-wrap div[data-testid="stSlider"],
+          .fx-panel-wrap div[data-testid="stPlotlyChart"]{
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          /* Estilo combobox base (default) */
+          .fx-panel-wrap div[role="combobox"]{
+            border-radius: 16px !important;
+            border: 1px solid rgba(15,23,42,0.10) !important;
+            background: rgba(255,255,255,0.94) !important;
+            box-shadow: 0 10px 18px rgba(15, 55, 100, 0.08) !important;
+          }
+
+          /* Selectbox medida estilo chip (oscuro + texto azul) */
+          .fx-panel-wrap div[data-testid="stSelectbox"] div[role="combobox"]{
+            background: #0b2a55 !important;
+            border: 1px solid rgba(255,255,255,0.14) !important;
+            box-shadow: 0 10px 18px rgba(15, 55, 100, 0.10) !important;
+          }
+          .fx-panel-wrap div[data-testid="stSelectbox"] div[role="combobox"] *{
+            color: #8fc2ff !important;
+            fill: #8fc2ff !important;
+            font-weight: 800 !important;
+          }
+
+          /* Tags multiselect (texto BLANCO garantizado) */
+          .fx-panel-wrap span[data-baseweb="tag"]{
+            background: #0b2a55 !important;
+            border-radius: 10px !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
+          }
+          .fx-panel-wrap span[data-baseweb="tag"] *{
+            color: #ffffff !important;
+            fill: #ffffff !important;
+            font-weight: 800 !important;
+          }
+
+          @media (max-width: 900px){
+            .fx-row{ grid-template-columns: 1fr; row-gap: 10px; }
+            .fx-meta{ white-space: normal; }
+            .fx-pills{ justify-content: flex-start; }
           }
         </style>
-        """,
+        """
+        ),
         unsafe_allow_html=True,
     )
 
+    # =========================
+    # Series
+    # =========================
     SERIES_TASAS = {
-        13: {"nombre": "Adelantos a c/c de Empresas"},
+        13: {"nombre": "Adelantos a Empresas"},
         12: {"nombre": "Plazo Fijo"},
         14: {"nombre": "Préstamos Personales"},
     }
+    OPT_INFL = "Inflación esperada (REM 12m)"
+    ID_REM = 29
 
-    # ---------- Selector angosto, alineado a la izquierda ----------
-    sel_wrap, _ = st.columns([4, 6])
-    with sel_wrap:
-        sel_ids = st.multiselect(
-            "Tasas",
-            options=[13, 12, 14],
-            default=[13, 14],
-            format_func=lambda k: SERIES_TASAS[k]["nombre"],
-            label_visibility="collapsed",
-        )
+    # =========================
+    # Load data
+    # =========================
+    fact = st.empty()
+    fact.info("💡 " + random.choice(INDU_LOADING_PHRASES))
 
-    if not sel_ids:
-        st.warning("Seleccioná al menos una tasa.")
-        return
+    with st.spinner("Cargando datos..."):
+        rem29 = _rem29_to_daily(get_monetaria_serie(ID_REM))
 
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        series_data = {}
+        for sid in SERIES_TASAS:
+            df = get_monetaria_serie(sid)
+            if df is None or df.empty:
+                continue
+            df = df.copy()
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.normalize()
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+            df = df.dropna(subset=["Date", "value"]).sort_values("Date")
+            series_data[sid] = df
 
-    #### NUEVO: frase mientras carga REM + tasas (se borra al terminar)
-    fact_ph = st.empty()
-    fact_ph.info("💡 " + random.choice(INDU_LOADING_PHRASES))
-    ####
-
-    # ---------- REM 29 como benchmark (mensual -> diario) ----------
-    rem29_m = get_monetaria_serie(29)
-    rem29_d = _rem29_to_daily(rem29_m)
-    inflacion_esp_12m = float(rem29_d["value"].iloc[-1]) if not rem29_d.empty else 20.0
-
-    # ---------- Series seleccionadas ----------
-    series_data = {}
-    for sid in sel_ids:
-        df = get_monetaria_serie(sid)
-        if df.empty:
-            continue
-        df = df.dropna(subset=["Date", "value"]).sort_values("Date").reset_index(drop=True)
-        series_data[sid] = df
-
-    #### NUEVO: limpiar mensaje cuando termina la carga de datos
-    fact_ph.empty()
-    ####
+    fact.empty()
 
     if not series_data:
-        st.warning("Sin datos para las tasas seleccionadas.")
+        st.warning("Sin datos para las tasas.")
         return
 
-    # KPI: primera seleccionada disponible
-    base_id = sel_ids[0] if sel_ids[0] in series_data else list(series_data.keys())[0]
-    base_df = series_data[base_id]
-    last_val = float(base_df["value"].iloc[-1])
-    last_date_ts = pd.to_datetime(base_df["Date"].iloc[-1])
+    max_rate_date = max(df["Date"].max() for df in series_data.values())
+    rem29 = _extend_daily_ffill(rem29, max_rate_date)
 
-    c1, c2 = st.columns([1, 3])
+    # =========================
+    # Defaults (state) - SIEMPRE antes de crear widgets
+    # =========================
+    if "tasa_medida" not in st.session_state:
+        st.session_state["tasa_medida"] = "Tasa nominal anual"
+    if "tasa_vars" not in st.session_state:
+        st.session_state["tasa_vars"] = [SERIES_TASAS[13]["nombre"]]
 
-    # ---------- KPI + CSV ----------
-    with c1:
-        st.markdown(
-            f"""
-            <div style="font-size:46px; font-weight:800; line-height:1.0;">
-                {_fmt_pct_es(last_val, 1)}% <span style="font-size:18px; font-weight:700;">TNA</span>
-            </div>
-            <div style="margin-top:8px; color:#6b7280; font-size:14px;">
-                Último dato ({SERIES_TASAS[base_id]["nombre"]}): {last_date_ts.strftime("%d/%m/%Y")}
-            </div>
+    # =========================
+    # Master DF
+    # =========================
+    min_date = min(df["Date"].min() for df in series_data.values())
+    cal = pd.DataFrame({"Date": pd.date_range(min_date, max_rate_date, freq="D")})
+    df_master = cal.copy()
+
+    for sid, meta in SERIES_TASAS.items():
+        name = meta["nombre"]
+        tmp = series_data[sid][["Date", "value"]].rename(columns={"value": name})
+        df_master = df_master.merge(tmp, on="Date", how="left")
+        last = series_data[sid]["Date"].max()
+        df_master[name] = df_master[name].ffill()
+        df_master.loc[df_master["Date"] > last, name] = np.nan
+
+    df_master = df_master.merge(rem29.rename(columns={"value": OPT_INFL}), on="Date", how="left")
+    df_master[OPT_INFL] = df_master[OPT_INFL].ffill()
+
+    # =========================================================
+    # Panel grande: TODO adentro de un container
+    # (esto evita que el header quede “abajo”)
+    # =========================================================
+    with st.container():
+
+        # --- marker + JS PRIMERO en el container ---
+        st.markdown("<span id='tasa_panel_marker'></span>", unsafe_allow_html=True)
+        components.html(
+            """
+            <script>
+            (function() {
+              function applyPanelClass() {
+                const marker = window.parent.document.getElementById('tasa_panel_marker');
+                if (!marker) return;
+                const block = marker.closest('div[data-testid="stVerticalBlock"]');
+                if (block) block.classList.add('fx-panel-wrap');
+              }
+
+              applyPanelClass();
+
+              let tries = 0;
+              const t = setInterval(() => {
+                applyPanelClass();
+                tries += 1;
+                if (tries >= 10) clearInterval(t);
+              }, 150);
+
+              const obs = new MutationObserver(() => applyPanelClass());
+              obs.observe(window.parent.document.body, { childList: true, subtree: true });
+              setTimeout(() => obs.disconnect(), 3000);
+            })();
+            </script>
             """,
-            unsafe_allow_html=True,
+            height=0,
         )
 
-        # CSV largo: date, serie, value
-        long_parts = []
-        for sid, df in series_data.items():
-            tmp = df.rename(columns={"Date": "date", "value": "value"}).copy()
-            tmp["serie"] = SERIES_TASAS[sid]["nombre"]
-            long_parts.append(tmp[["date", "serie", "value"]])
-        out = pd.concat(long_parts, ignore_index=True).sort_values(["serie", "date"])
+        # =========================
+        # Controles (arriba del header? NO: header primero como FX)
+        # =========================
+        # Primero: calcular opciones vigentes según medida (para limpiar selección)
+        base_opts = [v["nombre"] for v in SERIES_TASAS.values()]
+        medida_now = st.session_state.get("tasa_medida", "Tasa nominal anual")
+        opts_now = base_opts if medida_now != "Tasa nominal anual" else base_opts + [OPT_INFL]
 
-        csv_bytes = out.to_csv(index=False).encode("utf-8")
-        file_name = f"tasas_tna_{last_date_ts.strftime('%Y-%m-%d')}.csv"
+        # limpiar selección inválida ANTES de dibujar widgets
+        st.session_state["tasa_vars"] = [v for v in st.session_state.get("tasa_vars", []) if v in opts_now]
 
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        st.download_button(
-            label="⬇️ Descargar CSV",
-            data=csv_bytes,
-            file_name=file_name,
-            mime="text/csv",
-            use_container_width=False,
-        )
+        # si quedó vacía, dejamos vacía (para que se vea el warning “Seleccioná una variable”)
+        # (no seteamos default acá, porque querés poder borrar todas sin error)
 
-    # ---------- Controles + Gráfico ----------
-    with c2:
-        rango = st.radio(
-            "Período",
-            ["6M", "1A", "2A", "5A", "Todo"],
-            horizontal=True,
-            index=2,
-            label_visibility="collapsed",
-        )
+        # =========================
+        # Header (usa 1ra variable seleccionada si existe; si no, muestra header “vacío”)
+        # =========================
+        vars_sel = st.session_state.get("tasa_vars", [])
+        base_name = vars_sel[0] if vars_sel else base_opts[0]
 
-        show_infl_line = st.checkbox("Mostrar inflación esperada (REM) en el gráfico", value=False)
+        s = df_master[["Date", base_name, OPT_INFL]].copy().sort_values("Date")
+        s = s.dropna(subset=[base_name]).copy()
 
-        max_real = max(pd.to_datetime(df["Date"].max()) for df in series_data.values())
-
-        if rango == "6M":
-            min_sel = max_real - pd.DateOffset(months=6)
-        elif rango == "1A":
-            min_sel = max_real - pd.DateOffset(years=1)
-        elif rango == "2A":
-            min_sel = max_real - pd.DateOffset(years=2)
-        elif rango == "5A":
-            min_sel = max_real - pd.DateOffset(years=5)
+        if st.session_state["tasa_medida"] == "Tasa nominal anual":
+            s["VAL"] = pd.to_numeric(s[base_name], errors="coerce")
+            unidad = "% TNA"
         else:
-            # por ahora, lo que haya en datos (después arreglamos lo de 2022 con paginación)
-            min_sel = min(pd.to_datetime(df["Date"].min()) for df in series_data.values())
+            s["VAL"] = (
+                (1 + pd.to_numeric(s[base_name], errors="coerce") / 100)
+                / (1 + pd.to_numeric(s[OPT_INFL], errors="coerce") / 100)
+                - 1
+            ) * 100
+            unidad = "% real"
 
-        max_sel = max_real + pd.DateOffset(months=1)
+        s = s.dropna(subset=["VAL"])
 
-        # Texto explicativo arriba del gráfico (sin pisarse con leyenda)
-        title_lines = []
-        for sid in sel_ids:
-            df = series_data.get(sid)
-            if df is None or df.empty:
-                continue
-            tasa_last = float(df["value"].iloc[-1])
-            title_lines.append(_title_line(SERIES_TASAS[sid]["nombre"], tasa_last, inflacion_esp_12m))
+        # si por lo que sea no hay datos, igual dibujamos header sin reventar
+        if s.empty:
+            last_date = pd.Timestamp(df_master["Date"].max())
+            last_val = np.nan
+            vm_pp = None
+            va_pp = None
+        else:
+            last_date = pd.to_datetime(s["Date"].iloc[-1])
+            last_val = float(s["VAL"].iloc[-1])
 
-        st.markdown(
-            "<div style='margin-top:8px; margin-bottom:6px; font-size:14px; line-height:1.35; color:#0f172a;'>"
-            + "<br>".join(title_lines)
-            + "</div>",
-            unsafe_allow_html=True,
+            v_m = _asof(s, last_date - pd.Timedelta(days=30), "VAL")
+            v_y = _asof(s, last_date - pd.Timedelta(days=365), "VAL")
+
+            vm_pp = None if v_m is None else (last_val - v_m)
+            va_pp = None if v_y is None else (last_val - v_y)
+
+        a_vm, cls_vm = _arrow_cls(vm_pp)
+        a_va, cls_va = _arrow_cls(va_pp)
+
+        header_lines = [
+            '<div class="fx-wrap">',
+            '  <div class="fx-title-row">',
+            '    <div class="fx-icon-badge">📈</div>',
+            '    <div class="fx-title">Tasa de interés</div>',
+            "  </div>",
+            '  <div class="fx-card">',
+            '    <div class="fx-row">',
+            f'      <div class="fx-value">{_fmt_pct_es(last_val, 1)}%</div>' if pd.notna(last_val) else '      <div class="fx-value">—</div>',
+            '      <div class="fx-meta">',
+            f'        {base_name}<span class="sep">|</span>{unidad}<span class="sep">|</span>{pd.to_datetime(last_date).strftime("%d/%m/%Y")}',
+            "      </div>",
+            '      <div class="fx-pills">',
+            '        <div class="fx-pill red">',
+            f'          <span class="fx-arrow {cls_vm}">{a_vm}</span>',
+            f'          <span class="{cls_vm}">{_fmt_pp_es(vm_pp, 1)}</span>',
+            '          <span class="lab">mensual</span>',
+            "        </div>",
+            '        <div class="fx-pill green">',
+            f'          <span class="fx-arrow {cls_va}">{a_va}</span>',
+            f'          <span class="{cls_va}">{_fmt_pp_es(va_pp, 1)}</span>',
+            '          <span class="lab">interanual</span>',
+            "        </div>",
+            "      </div>",
+            "    </div>",
+            "  </div>",
+            "</div>",
+        ]
+        st.markdown("\n".join(header_lines), unsafe_allow_html=True)
+
+        st.markdown("<div class='fx-panel-gap'></div>", unsafe_allow_html=True)
+
+        # =========================
+        # Controles (debajo del header, como FX)
+        # =========================
+        c1, c2 = st.columns(2, gap="large")
+
+        with c1:
+            st.markdown("<div class='fx-panel-title'>Seleccioná la medida</div>", unsafe_allow_html=True)
+            st.selectbox(
+                "",
+                ["Tasa nominal anual", "Tasa real (ex-ante, REM 12m)"],
+                key="tasa_medida",
+                label_visibility="collapsed",
+            )
+
+        # recomputar opts según la medida (porque el selectbox puede cambiarla)
+        base_opts = [v["nombre"] for v in SERIES_TASAS.values()]
+        medida_now = st.session_state.get("tasa_medida", "Tasa nominal anual")
+        opts_now = base_opts if medida_now != "Tasa nominal anual" else base_opts + [OPT_INFL]
+
+        # limpiar nuevamente (por si el usuario cambió medida recién)
+        st.session_state["tasa_vars"] = [v for v in st.session_state.get("tasa_vars", []) if v in opts_now]
+
+        with c2:
+            st.markdown("<div class='fx-panel-title'>Seleccioná la variable</div>", unsafe_allow_html=True)
+            st.multiselect(
+                "",
+                options=opts_now,
+                key="tasa_vars",
+                label_visibility="collapsed",
+            )
+
+        # =========================
+        # Guard: sin variables seleccionadas
+        # =========================
+        vars_sel = st.session_state.get("tasa_vars", [])
+        if not vars_sel:
+            st.warning("Seleccioná una variable.")
+            return
+
+        # =========================
+        # Slider (default 2025, min 2004)
+        # =========================
+        min_slider = max(df_master["Date"].min().date(), pd.Timestamp("2004-01-01").date())
+        max_slider = df_master["Date"].max().date()
+        start_def = max(pd.Timestamp("2025-01-01").date(), min_slider)
+
+        st.markdown("<div class='fx-panel-title'>Rango de fechas</div>", unsafe_allow_html=True)
+        start_d, end_d = st.slider(
+            "",
+            min_value=min_slider,
+            max_value=max_slider,
+            value=(start_def, max_slider),
+            label_visibility="collapsed",
+            key="tasa_range",
         )
 
+        df_plot = df_master[
+            (df_master["Date"] >= pd.Timestamp(start_d)) & (df_master["Date"] <= pd.Timestamp(end_d))
+        ].copy()
+
+        # =========================
+        # Plot
+        # =========================
         fig = go.Figure()
 
-        for sid in sel_ids:
-            df = series_data.get(sid)
-            if df is None or df.empty:
+        for v in vars_sel:
+            if v == OPT_INFL:
+                # inflación solo en nominal
+                if st.session_state["tasa_medida"] == "Tasa nominal anual":
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_plot["Date"],
+                            y=df_plot[OPT_INFL],
+                            name=OPT_INFL,
+                            mode="lines",
+                            line=dict(dash="dot"),
+                        )
+                    )
                 continue
-            df_plot = df[df["Date"] >= min_sel].copy()
+
+            if st.session_state["tasa_medida"] == "Tasa nominal anual":
+                y = df_plot[v]
+            else:
+                y = ((1 + df_plot[v] / 100) / (1 + df_plot[OPT_INFL] / 100) - 1) * 100
+
+            fig.add_trace(go.Scatter(x=df_plot["Date"], y=y, name=v, mode="lines"))
+
+        # línea 0% (gris oscura)
+        fig.add_hline(y=0, line_width=1, line_dash="solid", line_color="rgba(80,80,80,0.7)")
+
+        fig.update_layout(
+            height=520,
+            hovermode="x",
+            margin=dict(l=10, r=10, t=10, b=50),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            dragmode=False,
+        )
+        fig.update_yaxes(ticksuffix="%")
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+        )
+
+        st.markdown(
+            "<div style='color:rgba(20,50,79,0.70); font-size:12px;'>"
+            "Fuente: Banco Central de la República Argentina."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ============================================================
+    # RESERVAS INTERNACIONALES BRUTAS (BCRA) — PANEL NUEVO
+    # id serie = 1 | millones de USD
+    # ============================================================
+    st.divider()
+
+    with st.spinner("Cargando reservas internacionales..."):
+        reservas = get_monetaria_serie(1)
+
+    if reservas is None or reservas.empty:
+        st.warning("Sin datos de Reservas Internacionales Brutas.")
+        return
+
+    reservas = reservas.copy()
+    reservas["Date"] = pd.to_datetime(reservas["Date"], errors="coerce").dt.normalize()
+    reservas["value"] = pd.to_numeric(reservas["value"], errors="coerce")
+    reservas = reservas.dropna(subset=["Date", "value"]).sort_values("Date").reset_index(drop=True)
+
+    # 👇 CLAVE: todo adentro de un container, como FX
+    with st.container():
+
+        # --- marker + JS PRIMERO ---
+        st.markdown("<span id='res_panel_marker'></span>", unsafe_allow_html=True)
+        components.html(
+            """
+            <script>
+            (function() {
+            function applyResPanelClass() {
+                const marker = window.parent.document.getElementById('res_panel_marker');
+                if (!marker) return;
+                const block = marker.closest('div[data-testid="stVerticalBlock"]');
+                if (block) block.classList.add('fx-panel-wrap');
+            }
+
+            applyResPanelClass();
+
+            let tries = 0;
+            const t = setInterval(() => {
+                applyResPanelClass();
+                tries += 1;
+                if (tries >= 10) clearInterval(t);
+            }, 150);
+
+            const obs = new MutationObserver(() => applyResPanelClass());
+            obs.observe(window.parent.document.body, { childList: true, subtree: true });
+            setTimeout(() => obs.disconnect(), 3000);
+            })();
+            </script>
+            """,
+            height=0,
+        )
+
+        # -------------------------
+        # Header (nivel + % mensual e interanual)
+        # -------------------------
+        last_date = pd.to_datetime(reservas["Date"].iloc[-1])
+        last_val = float(reservas["value"].iloc[-1])
+
+        val_m = _asof_reservas = None
+        # usamos helper local rápido con la misma lógica que ya tenés
+        def _asof_res(df_: pd.DataFrame, target: pd.Timestamp):
+            tt = df_.dropna(subset=["Date", "value"]).sort_values("Date")
+            tt = tt[tt["Date"] <= target]
+            if tt.empty:
+                return None
+            return float(tt["value"].iloc[-1])
+
+        val_m = _asof_res(reservas, last_date - pd.Timedelta(days=30))
+        val_y = _asof_res(reservas, last_date - pd.Timedelta(days=365))
+
+        vm = None if val_m is None else (last_val / val_m - 1) * 100
+        va = None if val_y is None else (last_val / val_y - 1) * 100
+
+        a_vm, cls_vm = _arrow_cls(vm)   # 👈 usa tu helper GLOBAL (NO redefinir)
+        a_va, cls_va = _arrow_cls(va)
+
+        vm_txt = safe_pct(vm, 1)
+        va_txt = safe_pct(va, 1)
+
+        def _fmt_musd(x: float) -> str:
+            try:
+                return f"{int(round(float(x))):,}".replace(",", ".")
+            except Exception:
+                return "—"
+
+        header_lines = [
+            '<div class="fx-wrap">',
+            '  <div class="fx-title-row">',
+            '    <div class="fx-icon-badge">🏦</div>',
+            '    <div class="fx-title">Reservas internacionales</div>',
+            "  </div>",
+            '  <div class="fx-card">',
+            '    <div class="fx-row">',
+            f'      <div class="fx-value">{_fmt_musd(last_val)}</div>',
+            '      <div class="fx-meta">',
+            f'        Reservas Internacionales Brutas<span class="sep">|</span>Millones de USD<span class="sep">|</span>{last_date.strftime("%d/%m/%Y")}',
+            "      </div>",
+            '      <div class="fx-pills">',
+            '        <div class="fx-pill red">',
+            f'          <span class="fx-arrow {cls_vm}">{a_vm}</span>',
+            f'          <span class="{cls_vm}">{vm_txt}</span>',
+            '          <span class="lab">mensual</span>',
+            "        </div>",
+            '        <div class="fx-pill green">',
+            f'          <span class="fx-arrow {cls_va}">{a_va}</span>',
+            f'          <span class="{cls_va}">{va_txt}</span>',
+            '          <span class="lab">interanual</span>',
+            "        </div>",
+            "      </div>",
+            "    </div>",
+            "  </div>",
+            "</div>",
+        ]
+        st.markdown("\n".join(header_lines), unsafe_allow_html=True)
+
+        st.markdown("<div class='fx-panel-gap'></div>", unsafe_allow_html=True)
+
+        # -------------------------
+        # Controles
+        # -------------------------
+        if "res_medida" not in st.session_state:
+            st.session_state["res_medida"] = "Nivel"
+
+        if "res_var" not in st.session_state:
+            st.session_state["res_var"] = "Reservas"
+
+        c1, c2 = st.columns(2, gap="large")
+
+        with c1:
+            st.markdown("<div class='fx-panel-title'>Seleccioná la medida</div>", unsafe_allow_html=True)
+            res_medida = st.selectbox(
+                "",
+                ["Nivel", "Variación acumulada"],
+                key="res_medida",
+                label_visibility="collapsed",
+            )
+
+        with c2:
+            st.markdown("<div class='fx-panel-title'>Seleccioná la variable</div>", unsafe_allow_html=True)
+            res_var = st.selectbox(
+                "",
+                ["Reservas"],
+                key="res_var",
+                label_visibility="collapsed",
+            )
+
+        # -------------------------
+        # Rango de fechas
+        # -------------------------
+        min_d = reservas["Date"].min().date()
+        max_d = reservas["Date"].max().date()
+        default_start = max(min_d, pd.Timestamp("2021-01-01").date())
+
+        st.markdown("<div class='fx-panel-title'>Rango de fechas</div>", unsafe_allow_html=True)
+        start_d, end_d = st.slider(
+            "",
+            min_value=min_d,
+            max_value=max_d,
+            value=(default_start, max_d),
+            label_visibility="collapsed",
+            key="res_rangebar",
+        )
+
+        df_plot = reservas[(reservas["Date"] >= pd.Timestamp(start_d)) & (reservas["Date"] <= pd.Timestamp(end_d))].copy()
+
+        # -------------------------
+        # Plot
+        # -------------------------
+        fig = go.Figure()
+
+        y0 = df_plot["value"].copy()
+
+        if res_medida == "Variación acumulada":
+            base_series = y0.dropna()
+            base = float(base_series.iloc[0]) if not base_series.empty else np.nan
+
+            y = (y0 / base - 1) * 100
+
             fig.add_trace(
                 go.Scatter(
                     x=df_plot["Date"],
-                    y=df_plot["value"],
-                    name=SERIES_TASAS[sid]["nombre"],
+                    y=y,
+                    name="Reservas (var. acum.)",
                     mode="lines",
+                    hovertemplate="%{x|%d/%m/%Y}<br>Variación acumulada: %{y:.2f}%<extra></extra>",
                 )
             )
 
-        if show_infl_line and (not rem29_d.empty):
-            infl_plot = rem29_d[(rem29_d["Date"] >= min_sel) & (rem29_d["Date"] <= max_sel)].copy()
+            # línea 0 gris oscura
+            fig.add_hline(y=0, line_width=1, line_dash="solid", line_color="rgba(80,80,80,0.7)")
+
+            # eje en %
+            fig.update_yaxes(ticksuffix="%")
+
+        else:
             fig.add_trace(
                 go.Scatter(
-                    x=infl_plot["Date"],
-                    y=infl_plot["value"],
-                    name="Inflación esperada (REM 12m)",
+                    x=df_plot["Date"],
+                    y=y0,
+                    name="Reservas",
                     mode="lines",
-                    line=dict(dash="dot"),
+                    hovertemplate="%{x|%d/%m/%Y}<br>Millones USD: %{y:,.0f}<extra></extra>"
+                    .replace(",", "X").replace(".", ",").replace("X", "."),
                 )
             )
 
-        # Eje X en español (ticks manuales)
-        mes_es = {
-            1: "ene", 2: "feb", 3: "mar", 4: "abr", 5: "may", 6: "jun",
-            7: "jul", 8: "ago", 9: "sep", 10: "oct", 11: "nov", 12: "dic",
-        }
-        tickvals = pd.date_range(pd.to_datetime(min_sel).normalize(), pd.to_datetime(max_sel).normalize(), freq="6MS")
-        ticktext = [f"{mes_es[d.month]} {d.year}" for d in tickvals]
+            # --- Formato argentino del eje Y SOLO en NIVEL (20.000, 30.000, etc.) ---
+            y_min = float(np.nanmin(y0.values))
+            y_max = float(np.nanmax(y0.values))
+
+            step = 5000  # ajustable (10000 si querés menos ticks)
+            ticks = np.arange(
+                np.floor(y_min / step) * step,
+                np.ceil(y_max / step) * step + step,
+                step
+            )
+
+            fig.update_yaxes(
+                tickmode="array",
+                tickvals=ticks,
+                ticktext=[f"{int(t):,}".replace(",", ".") for t in ticks],
+            )
 
         fig.update_layout(
-            hovermode="x unified",
-            height=450,
-            margin=dict(l=10, r=10, t=10, b=60),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            height=520,
+            hovermode="x",
+            margin=dict(l=10, r=10, t=10, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
+            dragmode=False,
         )
 
-        fig.update_yaxes(title_text="% (TNA)", ticksuffix="%")
-        fig.update_xaxes(
-            title_text="",
-            range=[min_sel, max_sel],
-            tickmode="array",
-            tickvals=tickvals,
-            ticktext=ticktext,
-            rangeslider=dict(visible=False),
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+
+        # -------------------------
+        # CSV + Fuente
+        # -------------------------
+        export = df_plot.rename(columns={"value": "reservas_musd"}).copy()
+        st.download_button(
+            "⬇️ Descargar CSV",
+            export.to_csv(index=False).encode("utf-8"),
+            file_name=f"reservas_{pd.Timestamp(end_d).strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+            key="dl_reservas_csv",
+        )
 
         st.markdown(
-            "<div style='color:#6b7280; font-size:12px; margin-top:6px;'>"
-            "Fuente: Banco Central de la República Argentina."
+            "<div style='color:rgba(20,50,79,0.70); font-size:12px; margin-top:10px;'>"
+            "Fuente: CEU-UIA en base a BCRA."
             "</div>",
             unsafe_allow_html=True,
         )
