@@ -589,11 +589,20 @@ def render_macro_tasa(go_to):
         )
         fig.update_yaxes(ticksuffix="%")
 
+        # --- Aire a la derecha (10 días)
+        x_max = pd.to_datetime(df_plot["Date"].max())
+        x_min = pd.to_datetime(df_plot["Date"].min())
+        fig.update_xaxes(range=[x_min, x_max + pd.Timedelta(days=10)])
+
+
+
         st.plotly_chart(
             fig,
             use_container_width=True,
             config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+            key="chart_tasas",
         )
+
 
         st.markdown(
             "<div style='color:rgba(20,50,79,0.70); font-size:12px;'>"
@@ -833,11 +842,20 @@ def render_macro_tasa(go_to):
             dragmode=False,
         )
 
+        fig.update_yaxes(ticksuffix="%")
+
+        # --- Aire a la derecha (10 días)
+        x_max = pd.to_datetime(df_plot["Date"].max())
+        x_min = pd.to_datetime(df_plot["Date"].min())
+        fig.update_xaxes(range=[x_min, x_max + pd.Timedelta(days=10)])
+
         st.plotly_chart(
             fig,
             use_container_width=True,
             config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
+            key="chart_reservas",
         )
+
 
 
         # -------------------------
