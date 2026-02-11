@@ -114,7 +114,7 @@ def render_main_home(go_to):
 
     sections = [
         ("🚢 Comercio Exterior", None),
-        ("📈 Actividad Económica", None),
+        ("📈 Actividad Económica", "macro_pbi_emae"),
         ("🚀 Datos Adelantados", None),
         ("📊 Macroeconomía", "macro_home"),
         ("💼 Empleo Privado", "empleo"),
