@@ -357,11 +357,25 @@ def render_macro_tasa(go_to):
 
     for sid, meta in SERIES_TASAS.items():
         name = meta["nombre"]
-        tmp = series_data[sid][["Date", "value"]].rename(columns={"value": name})
+
+        df_sid = series_data.get(sid)
+        if df_sid is None or df_sid.empty:
+            # opcional: warning suave (o solo continue para no ensuciar)
+            # st.warning(f"Serie BCRA faltante o vacía: {name} (id={sid})")
+            continue
+
+        # asegurar columnas y limpieza (por si vino raro)
+        if "Date" not in df_sid.columns or "value" not in df_sid.columns:
+            # st.warning(f"Serie BCRA con columnas inesperadas: {name} (id={sid}) cols={list(df_sid.columns)}")
+            continue
+
+        tmp = df_sid[["Date", "value"]].rename(columns={"value": name})
         df_master = df_master.merge(tmp, on="Date", how="left")
-        last = series_data[sid]["Date"].max()
-        df_master[name] = df_master[name].ffill()
+
+        last = df_sid["Date"].max()
+        df_master[name] = pd.to_numeric(df_master[name], errors="coerce").ffill()
         df_master.loc[df_master["Date"] > last, name] = np.nan
+
 
     df_master = df_master.merge(rem29.rename(columns={"value": OPT_INFL}), on="Date", how="left")
     df_master[OPT_INFL] = df_master[OPT_INFL].ffill()
