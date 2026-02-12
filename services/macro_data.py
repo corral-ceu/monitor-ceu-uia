@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from io import BytesIO
-from io import StringIO 
+from io import StringIO
 
 
 # ============================================================
@@ -190,7 +190,6 @@ def get_ipc_nacional_nivel_general() -> pd.DataFrame:
     )
 
 
-
 # ============================================================
 # IPC BCRA (id=27) para bandas
 # ============================================================
@@ -301,10 +300,10 @@ def get_itcrm_excel_long() -> pd.DataFrame:
 
 
 # ============================================================
-# DATOS.GOB.AR — EMAE (INDEC)
+# DATOS.GOB.AR — SERIES (GENÉRICO)
 # ============================================================
-
 DATOS_GOB_AR_SERIES_URL = "https://apis.datos.gob.ar/series/api/series"
+
 
 def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
     """
@@ -312,7 +311,7 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
     Soporta:
       - formato largo: indice_tiempo, serie_id, valor
       - formato ancho: indice_tiempo + columna con el id de la serie
-      - formato simple: indice_tiempo, valor   <-- ESTE ERA EL QUE FALTABA
+      - formato simple: indice_tiempo, valor
     Devuelve DataFrame con columnas Date, Value.
     """
     try:
@@ -332,7 +331,7 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
             out = df[["indice_tiempo", series_id]].copy()
             out = out.rename(columns={"indice_tiempo": "Date", series_id: "Value"})
 
-        # 3) ✅ Formato simple (una sola serie)
+        # 3) Formato simple (una sola serie)
         elif {"indice_tiempo", "valor"}.issubset(df.columns):
             out = df[["indice_tiempo", "valor"]].copy()
             out = out.rename(columns={"indice_tiempo": "Date", "valor": "Value"})
@@ -349,21 +348,19 @@ def _parse_datos_gob_series_csv(csv_text: str, series_id: str) -> pd.DataFrame:
 
         return (
             out.dropna(subset=["Date", "Value"])
-               .drop_duplicates(subset=["Date"])
-               .sort_values("Date")
-               .reset_index(drop=True)
+            .drop_duplicates(subset=["Date"])
+            .sort_values("Date")
+            .reset_index(drop=True)
         )
 
     except Exception:
         return pd.DataFrame(columns=["Date", "Value"])
 
 
-
 @st.cache_data(ttl=12 * 60 * 60)
 def get_datos_gob_series(series_id: str) -> pd.DataFrame:
     """
     Descarga una serie puntual desde datos.gob.ar.
-    Usamos CSV porque en Jupyter te funciona perfecto.
     """
     params = {"ids": series_id, "format": "csv", "limit": 1000}
 
@@ -378,24 +375,9 @@ def get_datos_gob_series(series_id: str) -> pd.DataFrame:
             },
         )
 
-        # Si falla, queremos ver algo útil en la app (no silencio total)
         if r.status_code != 200:
             st.warning(f"datos.gob.ar ({series_id}) status={r.status_code}: {r.text[:200]}")
             return pd.DataFrame(columns=["Date", "Value"])
-
-        # DEBUG TEMPORAL (borrar cuando ande)
-        st.write(
-            f"DEBUG datos.gob.ar {series_id}: status={r.status_code}, "
-            f"content-type={r.headers.get('content-type')}"
-        )
-        st.write("DEBUG first 200 chars:", r.text[:200])
-
-        try:
-            _tmp = pd.read_csv(StringIO(r.text), nrows=5)
-            st.write("DEBUG cols:", _tmp.columns.tolist())
-            st.write("DEBUG head:", _tmp.head())
-        except Exception as e:
-            st.error(f"DEBUG read_csv failed: {e}")
 
         return _parse_datos_gob_series_csv(r.text, series_id)
 
@@ -404,6 +386,9 @@ def get_datos_gob_series(series_id: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["Date", "Value"])
 
 
+# ============================================================
+# DATOS.GOB.AR — EMAE (INDEC)
+# ============================================================
 
 # IDs (confirmados por vos)
 EMAE_ORIGINAL_ID = "143.3_NO_PR_2004_A_21"
@@ -432,17 +417,96 @@ def get_emae_both_csv() -> pd.DataFrame:
     df = pd.read_csv(StringIO(r.text))
     df.columns = [c.strip() for c in df.columns]
 
-    # ✅ Caso A) columnas con nombre por ID
+    # Caso A) columnas con nombre por ID
     if "indice_tiempo" in df.columns and (EMAE_ORIGINAL_ID in df.columns) and (EMAE_DESEASON_ID in df.columns):
         df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
         return df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
 
-    # ✅ Caso B) columnas genéricas (TU CASO)
+    # Caso B) columnas genéricas
     if {"indice_tiempo", "emae_original", "emae_desestacionalizada"}.issubset(df.columns):
         df = df.rename(
             columns={
                 "emae_original": EMAE_ORIGINAL_ID,
                 "emae_desestacionalizada": EMAE_DESEASON_ID,
+            }
+        )
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        return df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    # Caso C) formato largo
+    if {"indice_tiempo", "serie_id", "valor"}.issubset(df.columns):
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+        wide = (
+            df.pivot(index="indice_tiempo", columns="serie_id", values="valor")
+            .reset_index()
+            .rename_axis(None, axis=1)
+        )
+        return wide.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    st.warning(f"datos.gob.ar EMAE both: formato CSV inesperado. cols={df.columns.tolist()}")
+    return pd.DataFrame()
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_emae_original() -> pd.DataFrame:
+    df = get_emae_both_csv()
+    if df.empty or EMAE_ORIGINAL_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", EMAE_ORIGINAL_ID]].rename(columns={"indice_tiempo": "Date", EMAE_ORIGINAL_ID: "Value"})
+    return out.dropna().reset_index(drop=True)
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_emae_deseasonalizado() -> pd.DataFrame:
+    df = get_emae_both_csv()
+    if df.empty or EMAE_DESEASON_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", EMAE_DESEASON_ID]].rename(columns={"indice_tiempo": "Date", EMAE_DESEASON_ID: "Value"})
+    return out.dropna().reset_index(drop=True)
+
+
+# ============================================================
+# DATOS.GOB.AR — ISAC (INDEC)
+# ============================================================
+
+ISAC_ORIGINAL_ID = "33.2_ISAC_NIVELRAL_0_M_18_63"
+ISAC_DESEASON_ID = "33.2_ISAC_SIN_EDAD_0_M_23_56"
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_isac_both_csv() -> pd.DataFrame:
+    ids = f"{ISAC_ORIGINAL_ID},{ISAC_DESEASON_ID}"
+    params = {"ids": ids, "format": "csv", "limit": 1000}
+
+    r = requests.get(
+        DATOS_GOB_AR_SERIES_URL,
+        params=params,
+        timeout=30,
+        headers={
+            "User-Agent": "monitor-ceu-uia/1.0 (streamlit)",
+            "Accept": "text/csv,*/*",
+        },
+    )
+
+    if r.status_code != 200:
+        st.warning(f"datos.gob.ar ISAC both status={r.status_code}: {r.text[:200]}")
+        return pd.DataFrame()
+
+    df = pd.read_csv(StringIO(r.text))
+    df.columns = [c.strip() for c in df.columns]
+
+    # ✅ Caso A) columnas con nombre por ID
+    if "indice_tiempo" in df.columns and (ISAC_ORIGINAL_ID in df.columns) and (ISAC_DESEASON_ID in df.columns):
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        return df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    # ✅ Caso B) columnas genéricas (TU CASO)
+    if {"indice_tiempo", "isac_nivel_general", "isac_sin_estacionalidad"}.issubset(df.columns):
+        df = df.rename(
+            columns={
+                "isac_nivel_general": ISAC_ORIGINAL_ID,
+                "isac_sin_estacionalidad": ISAC_DESEASON_ID,
             }
         )
         df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
@@ -459,24 +523,300 @@ def get_emae_both_csv() -> pd.DataFrame:
         )
         return wide.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
 
-    st.warning(f"datos.gob.ar EMAE both: formato CSV inesperado. cols={df.columns.tolist()}")
+    st.warning(f"datos.gob.ar ISAC both: formato CSV inesperado. cols={df.columns.tolist()}")
     return pd.DataFrame()
 
-@st.cache_data(ttl=12 * 60 * 60)
-def get_emae_original() -> pd.DataFrame:
-    df = get_emae_both_csv()
-    if df.empty or EMAE_ORIGINAL_ID not in df.columns:
-        return pd.DataFrame(columns=["Date", "Value"])
-    out = df[["indice_tiempo", EMAE_ORIGINAL_ID]].rename(columns={"indice_tiempo":"Date", EMAE_ORIGINAL_ID:"Value"})
-    return out.dropna().reset_index(drop=True)
+
 
 @st.cache_data(ttl=12 * 60 * 60)
-def get_emae_deseasonalizado() -> pd.DataFrame:
-    df = get_emae_both_csv()
-    if df.empty or EMAE_DESEASON_ID not in df.columns:
+def get_isac_original() -> pd.DataFrame:
+    df = get_isac_both_csv()
+    if df.empty or ISAC_ORIGINAL_ID not in df.columns:
         return pd.DataFrame(columns=["Date", "Value"])
-    out = df[["indice_tiempo", EMAE_DESEASON_ID]].rename(columns={"indice_tiempo":"Date", EMAE_DESEASON_ID:"Value"})
+    out = df[["indice_tiempo", ISAC_ORIGINAL_ID]].rename(columns={"indice_tiempo": "Date", ISAC_ORIGINAL_ID: "Value"})
     return out.dropna().reset_index(drop=True)
 
 
+@st.cache_data(ttl=12 * 60 * 60)
+def get_isac_deseasonalizado() -> pd.DataFrame:
+    df = get_isac_both_csv()
+    if df.empty or ISAC_DESEASON_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", ISAC_DESEASON_ID]].rename(columns={"indice_tiempo": "Date", ISAC_DESEASON_ID: "Value"})
+    return out.dropna().reset_index(drop=True)
 
+
+# ============================================================
+# DATOS.GOB.AR — IPI Manufacturero (INDEC)
+# ============================================================
+
+IPI_MANUF_ORIGINAL_ID = "453.1_SERIE_ORIGNAL_0_0_14_46"
+IPI_MANUF_DESEASON_ID = "453.1_SERIE_DESEADA_0_0_24_58"
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ipi_manuf_both_csv() -> pd.DataFrame:
+    ids = f"{IPI_MANUF_ORIGINAL_ID},{IPI_MANUF_DESEASON_ID}"
+    params = {"ids": ids, "format": "csv", "limit": 1000}
+
+    r = requests.get(
+        DATOS_GOB_AR_SERIES_URL,
+        params=params,
+        timeout=30,
+        headers={
+            "User-Agent": "monitor-ceu-uia/1.0 (streamlit)",
+            "Accept": "text/csv,*/*",
+        },
+    )
+
+    if r.status_code != 200:
+        st.warning(f"datos.gob.ar IPI manuf both status={r.status_code}: {r.text[:200]}")
+        return pd.DataFrame()
+
+    df = pd.read_csv(StringIO(r.text))
+    df.columns = [c.strip() for c in df.columns]
+
+    # ✅ Caso A) columnas con nombre por ID
+    if "indice_tiempo" in df.columns and (IPI_MANUF_ORIGINAL_ID in df.columns) and (IPI_MANUF_DESEASON_ID in df.columns):
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        return df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    # ✅ Caso B) columnas genéricas (TU CASO)
+    if {"indice_tiempo", "serie_original", "serie_desestacionalizada"}.issubset(df.columns):
+        df = df.rename(
+            columns={
+                "serie_original": IPI_MANUF_ORIGINAL_ID,
+                "serie_desestacionalizada": IPI_MANUF_DESEASON_ID,
+            }
+        )
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        return df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    # ✅ Caso C) formato largo
+    if {"indice_tiempo", "serie_id", "valor"}.issubset(df.columns):
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+        wide = (
+            df.pivot(index="indice_tiempo", columns="serie_id", values="valor")
+              .reset_index()
+              .rename_axis(None, axis=1)
+        )
+        return wide.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+    st.warning(f"datos.gob.ar IPI manuf both: formato CSV inesperado. cols={df.columns.tolist()}")
+    return pd.DataFrame()
+
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ipi_manuf_original() -> pd.DataFrame:
+    df = get_ipi_manuf_both_csv()
+    if df.empty or IPI_MANUF_ORIGINAL_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", IPI_MANUF_ORIGINAL_ID]].rename(
+        columns={"indice_tiempo": "Date", IPI_MANUF_ORIGINAL_ID: "Value"}
+    )
+    return out.dropna().reset_index(drop=True)
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ipi_manuf_deseasonalizado() -> pd.DataFrame:
+    df = get_ipi_manuf_both_csv()
+    if df.empty or IPI_MANUF_DESEASON_ID not in df.columns:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[["indice_tiempo", IPI_MANUF_DESEASON_ID]].rename(
+        columns={"indice_tiempo": "Date", IPI_MANUF_DESEASON_ID: "Value"}
+    )
+    return out.dropna().reset_index(drop=True)
+
+
+# ============================================================
+# INDEC — IPI MINERO (Excel)
+# ============================================================
+
+IPI_MINERO_XLSX_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/serie_ipi_minero.xlsx"
+IPI_MINERO_SHEET = "Cuadro 1"
+
+
+def _month_es_to_num(m: str):
+    if m is None or (isinstance(m, float) and np.isnan(m)):
+        return None
+    mm = str(m).strip().lower()
+    map_es = {
+        "enero": 1,
+        "febrero": 2,
+        "marzo": 3,
+        "abril": 4,
+        "mayo": 5,
+        "junio": 6,
+        "julio": 7,
+        "agosto": 8,
+        "septiembre": 9,
+        "setiembre": 9,
+        "octubre": 10,
+        "noviembre": 11,
+        "diciembre": 12,
+    }
+    return map_es.get(mm)
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ipi_minero_excel_long() -> pd.DataFrame:
+    """
+    Lee el Excel del INDEC y devuelve dos series en formato largo:
+      columnas: Date, Serie, Value
+    Según lo que pasaste:
+      - arranca fila 9
+      - A: año (con vacíos para meses)
+      - B: mes
+      - D: serie original (nivel general, números índice)
+      - H: serie sin estacionalidad (nivel general, números índice)
+    """
+    try:
+        r = requests.get(IPI_MINERO_XLSX_URL, timeout=60)
+        r.raise_for_status()
+
+        raw = pd.read_excel(
+            BytesIO(r.content),
+            sheet_name=IPI_MINERO_SHEET,
+            header=None,
+            engine="openpyxl",
+        )
+
+        # fila 9 -> índice 8 (0-based)
+        df = raw.iloc[8:, :].copy()
+
+        # A,B,D,H -> 0,1,3,7
+        df = df.iloc[:, [0, 1, 3, 7]]
+        df.columns = ["Year", "Month", "Orig", "SA"]
+
+        # forward-fill del año (bloques)
+        df["Year"] = pd.to_numeric(df["Year"], errors="coerce")
+        df["Year"] = df["Year"].ffill()
+
+        # mes ES -> num
+        df["MonthNum"] = df["Month"].apply(_month_es_to_num)
+
+        # valores
+        df["Orig"] = pd.to_numeric(df["Orig"], errors="coerce")
+        df["SA"] = pd.to_numeric(df["SA"], errors="coerce")
+
+        # fecha (inicio de mes)
+        df = df.dropna(subset=["Year", "MonthNum"])
+        df["Date"] = pd.to_datetime(
+            dict(year=df["Year"].astype(int), month=df["MonthNum"].astype(int), day=1),
+            errors="coerce",
+        )
+
+        df = df.dropna(subset=["Date"]).sort_values("Date")
+
+        long_df = (
+            df.melt(
+                id_vars=["Date"],
+                value_vars=["Orig", "SA"],
+                var_name="Serie",
+                value_name="Value",
+            )
+            .dropna(subset=["Value"])
+            .sort_values(["Serie", "Date"])
+            .reset_index(drop=True)
+        )
+
+        long_df["Serie"] = long_df["Serie"].map({"Orig": "original", "SA": "sa"}).fillna(long_df["Serie"])
+
+        return long_df
+
+    except Exception as e:
+        st.warning(f"INDEC IPI minero excel error: {e}")
+        return pd.DataFrame(columns=["Date", "Serie", "Value"])
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ipi_minero_original() -> pd.DataFrame:
+    df = get_ipi_minero_excel_long()
+    if df.empty:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[df["Serie"] == "original"][["Date", "Value"]].copy()
+    return (
+        out.dropna(subset=["Date", "Value"])
+        .drop_duplicates(subset=["Date"])
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_ipi_minero_deseasonalizado() -> pd.DataFrame:
+    df = get_ipi_minero_excel_long()
+    if df.empty:
+        return pd.DataFrame(columns=["Date", "Value"])
+    out = df[df["Serie"] == "sa"][["Date", "Value"]].copy()
+    return (
+        out.dropna(subset=["Date", "Value"])
+        .drop_duplicates(subset=["Date"])
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+
+# ============================================================
+# EMAE — Apertura por sectores (CSV SSPM / infra.datos.gob.ar)
+# ============================================================
+
+EMAE_SECTORES_CSV_URL = (
+    "https://infra.datos.gob.ar/catalog/sspm/dataset/11/distribution/11.3/"
+    "download/emae-apertura-por-sectores-valores-mensuales-indice-base-2004.csv"
+)
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_emae_sectores_wide() -> pd.DataFrame:
+    """
+    Descarga EMAE apertura por sectores (serie original, índice base 2004) en formato ancho.
+    Columnas: indice_tiempo + sectores.
+    """
+    try:
+        r = requests.get(
+            EMAE_SECTORES_CSV_URL,
+            timeout=30,
+            headers={"User-Agent": "monitor-ceu-uia/1.0 (streamlit)"},
+        )
+        r.raise_for_status()
+
+        df = pd.read_csv(StringIO(r.text))
+        df.columns = [c.strip() for c in df.columns]
+
+        if "indice_tiempo" not in df.columns:
+            st.warning(f"EMAE sectores: CSV inesperado. cols={df.columns.tolist()}")
+            return pd.DataFrame()
+
+        df["indice_tiempo"] = pd.to_datetime(df["indice_tiempo"], errors="coerce")
+        df = df.dropna(subset=["indice_tiempo"]).sort_values("indice_tiempo")
+
+        # numeric all sector cols
+        for c in df.columns:
+            if c != "indice_tiempo":
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        return df.reset_index(drop=True)
+
+    except Exception as e:
+        st.warning(f"EMAE sectores CSV error: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=12 * 60 * 60)
+def get_emae_sectores_long() -> pd.DataFrame:
+    """
+    Devuelve formato largo:
+      Date, Sector, Value
+    """
+    wide = get_emae_sectores_wide()
+    if wide is None or wide.empty:
+        return pd.DataFrame(columns=["Date", "Sector", "Value"])
+
+    long_df = (
+        wide.melt(id_vars=["indice_tiempo"], var_name="Sector", value_name="Value")
+        .rename(columns={"indice_tiempo": "Date"})
+        .dropna(subset=["Date", "Value"])
+        .sort_values(["Sector", "Date"])
+        .reset_index(drop=True)
+    )
+    return long_df
