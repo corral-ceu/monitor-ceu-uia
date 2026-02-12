@@ -205,7 +205,7 @@ def _last_brecha_from_macro_fx():
     """
     # ✅ CCL desde services (evita import circular con pages.macro_fx)
     try:
-        from services.market_data import get_ccl_ypf_df
+        from services.market_data import get_ccl_ypf_df_fast
     except Exception:
         return None, None
 
@@ -214,7 +214,7 @@ def _last_brecha_from_macro_fx():
         return None, None
 
     try:
-        ccl = get_ccl_ypf_df(start="2000-01-01", prefer_adj=False)
+        ccl = get_ccl_ypf_df_fast(period="2y", prefer_adj=False)
     except Exception:
         return None, None
 
@@ -265,13 +265,17 @@ def _last_brecha_from_macro_fx():
     left = ccl[["Date", "CCL"]].tail(600).sort_values("Date")
     right = ofi[["Date", "FX"]].tail(1200).sort_values("Date")
 
+    left = ofi[["Date", "FX"]].tail(1200).sort_values("Date")     # FECHAS OFICIAL
+    right = ccl[["Date", "CCL"]].tail(1200).sort_values("Date")   # CCL ANTERIOR
+
     m = pd.merge_asof(
         left,
         right,
         on="Date",
         direction="backward",
-        tolerance=pd.Timedelta(days=7),
+        tolerance=pd.Timedelta(days=14),
     ).dropna()
+
 
     if m.empty:
         return None, None
@@ -321,9 +325,9 @@ def _last_merval_usd():
         return None
 
     try:
-        merv_dl = yf.download("^MERV", period="1y", progress=False, auto_adjust=False, group_by="column", threads=True)
-        ypf_ars_dl = yf.download("YPFD.BA", period="1y", progress=False, auto_adjust=False, group_by="column", threads=True)
-        ypf_usd_dl = yf.download("YPF", period="1y", progress=False, auto_adjust=False, group_by="column", threads=True)
+        merv_dl = yf.download("^MERV", period="1y", progress=False, auto_adjust=False, group_by="column", threads=False)
+        ypf_ars_dl = yf.download("YPFD.BA", period="1y", progress=False, auto_adjust=False, group_by="column", threads=False)
+        ypf_usd_dl = yf.download("YPF", period="1y", progress=False, auto_adjust=False, group_by="column", threads=False)
 
         merv = _close_series(merv_dl)
         ypf_ars = _close_series(ypf_ars_dl)
@@ -771,9 +775,6 @@ def render_macro_home(go_to):
 
     st.markdown('<div class="macrohome-shell">', unsafe_allow_html=True)
 
-    # ✅ Loading arriba (visible)
-    loading_ph = st.empty()
-    loading_ph.info("⏳ Cargando últimos datos...")
 
     # Placeholder de frase
     fact_ph = st.empty()
@@ -826,19 +827,36 @@ def render_macro_home(go_to):
     with ph_ipim.container(): _kpi_card("—", "IPIM Manufacturas", "—")
     with ph_merv.container(): _kpi_card("—", "MERVAL (USD)", "—")
 
+    # --- SIEMPRE definir results antes de todo
+    results: dict = {}
+
     tasks = {
         "fx": _last_tc,
         "tasa": _last_tasa,
         "ipc": _last_ipc_bcra,
         "riesgo": _last_riesgo_pais,
-        "brecha": _last_brecha_from_macro_fx,
         "reservas": _last_reservas,
         "ipim": _last_ipim_ng_vm,
         "merval": _last_merval_usd,
         "news": _load_news_scored,
     }
 
-    results = {}
+    # Carga en paralelo
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futs = {ex.submit(fn): k for k, fn in tasks.items()}
+        for fut in as_completed(futs):
+            k = futs[fut]
+            try:
+                results[k] = fut.result()
+            except Exception:
+                results[k] = None
+
+    # ✅ brecha afuera del pool (pero results ya existe)
+    try:
+        results["brecha"] = _last_brecha_from_macro_fx()
+    except Exception:
+        results["brecha"] = (None, None)
+
 
     # Carga en paralelo
     with ThreadPoolExecutor(max_workers=7) as ex:
@@ -851,7 +869,6 @@ def render_macro_home(go_to):
                 results[k] = None
 
     # apagar loading y frase
-    loading_ph.empty()
     fact_ph.empty()
 
     # Ticker
