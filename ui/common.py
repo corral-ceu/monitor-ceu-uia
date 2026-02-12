@@ -35,7 +35,8 @@ def get_section(default: str = "home") -> str:
     return st.session_state.section
 
 
-def go_to(section: str) -> None:
-    st.session_state.section = section
-    st.query_params["section"] = section
+def go_to(section: str):
+    st.session_state["section"] = section
+    st.query_params["section"] = section  # mantiene URL consistente
     st.rerun()
+
