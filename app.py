@@ -9,7 +9,6 @@
 # ============================================================
 
 import warnings
-
 import streamlit as st
 
 from ui.theme import apply_global_styles
@@ -24,7 +23,6 @@ from pages.finanzas import render_finanzas
 from pages.empleo import render_empleo
 from pages.ipi import render_ipi
 from pages.macro_pbi_emae import render_macro_pbi_emae
-
 
 
 # ----------------------------
@@ -48,9 +46,59 @@ apply_global_styles()
 
 
 # ----------------------------
+# Cortina anti-ghost (solo al cambiar de sección)
+# ----------------------------
+def _nav_curtain_if_needed(current_sec: str):
+    prev = st.session_state.get("_prev_section")
+    if prev == current_sec:
+        return None  # reruns normales: no mostramos cortina
+
+    ph = st.empty()
+    ph.markdown(
+        """
+        <style>
+        .nav-banner{
+            position: fixed;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 999999;
+
+            background: #0f172a;
+            color: #ffffff !important;
+            border: 1px solid rgba(255,255,255,0.10);
+
+            border-radius: 999px;
+            padding: 10px 22px;
+
+            font-family: Inter, "Segoe UI", Arial, sans-serif;
+            font-weight: 900;
+            font-size: 14px;
+            letter-spacing: 0.02em;
+
+            box-shadow: 0 10px 24px rgba(15,23,42,0.25);
+        }
+
+        .nav-banner *{
+            color: #ffffff !important;
+        }
+        </style>
+
+        <div class="nav-banner">⏳ Cargando…</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    return ph
+
+
+# ----------------------------
 # Router
 # ----------------------------
 sec = get_section(default="home")
+
+# Mostrar cortina SOLO si cambió la sección (evita "fantasmas" del DOM anterior)
+curtain = _nav_curtain_if_needed(sec)
 
 # Logo en todas las secciones salvo Home
 if sec != "home":
@@ -95,9 +143,12 @@ elif sec == "macro_pbi_emae":
         go_to("home")
     render_macro_pbi_emae(go_to)
 
-
 else:
     st.warning("Sección desconocida. Volviendo al inicio.")
     go_to("home")
 
 
+# Apagar cortina y registrar sección actual
+if curtain is not None:
+    curtain.empty()
+st.session_state["_prev_section"] = sec
