@@ -14,16 +14,43 @@ except Exception:
 
 
 
+import time
+
 def _history_one(ticker: str, start: str) -> pd.DataFrame:
     if yf is None:
         raise RuntimeError("yfinance no está disponible (pip install yfinance).")
+
     t = yf.Ticker(ticker)
-    df = t.history(start=start, auto_adjust=False)  # daily
-    if df is None or df.empty:
-        return pd.DataFrame()
-    df = df.copy()
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-    return df
+
+    last_err = None
+    for _ in range(2):  # 2 intentos
+        try:
+            df = t.history(start=start, auto_adjust=False)  # daily
+            if df is None or df.empty:
+                raise RuntimeError(f"Yahoo devolvió vacío para {ticker}")
+            df = df.copy()
+
+            idx = pd.to_datetime(df.index, errors="coerce")
+            # quitar tz solo si existe
+            try:
+                if getattr(idx, "tz", None) is not None:
+                    idx = idx.tz_convert(None)
+            except Exception:
+                try:
+                    idx = idx.tz_localize(None)
+                except Exception:
+                    pass
+
+            df.index = idx
+            return df
+
+        except Exception as e:
+            last_err = e
+            time.sleep(0.3)  # micro pausa
+
+    # IMPORTANTE: tirar error para NO cachear vacío
+    raise RuntimeError(f"history() falló para {ticker}: {last_err}")
+
 
 
 def _pick_price_single(df: pd.DataFrame, prefer_adj: bool = False) -> pd.Series:
@@ -78,6 +105,79 @@ def get_ccl_ypf_df(start: str = "2000-01-01", prefer_adj: bool = False) -> pd.Da
     """
     s = get_ccl_ypf_history(start=start, prefer_adj=prefer_adj)
     return s.rename("value").reset_index().rename(columns={"index": "Date"})
+
+
+import time
+
+@st.cache_data(ttl=60 * 60, show_spinner=False)
+def get_ccl_ypf_df_fast(period: str = "2y", prefer_adj: bool = False) -> pd.DataFrame:
+    """
+    CCL proxy diario liviano (igual estilo que macro_home):
+    usa yf.download con period corto para evitar history(start=1993).
+    Devuelve DataFrame: Date, value
+    """
+    if yf is None:
+        return pd.DataFrame(columns=["Date", "value"])
+
+    def _get_close(dl, ticker: str) -> pd.Series:
+        # dl es DataFrame con MultiIndex cols cuando pedís varios tickers
+        # Queremos Close de cada ticker
+        if dl is None or dl.empty:
+            return pd.Series(dtype="float64")
+
+        if isinstance(dl.columns, pd.MultiIndex):
+            # formato: (campo, ticker) o (ticker, campo) depende
+            if ("Close", ticker) in dl.columns:
+                s = dl[("Close", ticker)]
+            elif (ticker, "Close") in dl.columns:
+                s = dl[(ticker, "Close")]
+            else:
+                # fallback: buscar "Close" en el segundo nivel
+                candidates = [c for c in dl.columns if "Close" in c]
+                s = dl[candidates[0]] if candidates else pd.Series(dtype="float64")
+        else:
+            # si viniera plano (raro en multi-ticker), probar Close
+            s = dl["Close"] if "Close" in dl.columns else pd.Series(dtype="float64")
+
+        s = s.copy()
+        s.index = pd.to_datetime(s.index, errors="coerce")
+        try:
+            s.index = s.index.tz_localize(None)
+        except Exception:
+            pass
+        s.index = s.index.normalize()
+        return pd.to_numeric(s, errors="coerce").dropna()
+
+    last_err = None
+    for _ in range(2):  # reintento rápido
+        try:
+            dl = yf.download(
+                ["YPFD.BA", "YPF"],
+                period=period,
+                progress=False,
+                auto_adjust=False,
+                group_by="column",
+                threads=False,     # clave: no más subthreads
+            )
+            s_ars = _get_close(dl, "YPFD.BA")
+            s_usd = _get_close(dl, "YPF")
+
+            df = pd.concat([s_ars.rename("YPF_ARS"), s_usd.rename("YPF_USD")], axis=1).dropna()
+            if df.empty:
+                raise RuntimeError("download devolvió vacío para YPFD.BA/YPF")
+
+            df["value"] = (df["YPF_ARS"] / df["YPF_USD"]).replace([float("inf"), -float("inf")], pd.NA)
+            out = df[["value"]].dropna().reset_index().rename(columns={"index": "Date"})
+            return out
+
+        except Exception as e:
+            last_err = e
+            time.sleep(0.25)
+
+    # No caches vacío “silencioso”: devolvemos vacío pero con columnas
+    return pd.DataFrame(columns=["Date", "value"])
+
+
 
 
 @st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
