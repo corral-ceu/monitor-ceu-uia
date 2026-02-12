@@ -18,10 +18,7 @@ from services.macro_data import (
 )
 
 # ✅ CCL desde services (NO yfinance acá)
-from services.market_data import (
-    get_ypf_ars_history,
-    get_ypf_usd_history,
-)
+from services.market_data import get_ccl_ypf_df_fast
 
 from ui.common import safe_pct
 
@@ -235,50 +232,40 @@ def render_macro_fx(go_to):
     # =========================
     # Load data
     # =========================
-    fact = st.empty()
-    fact.info("💡 " + random.choice(INDU_LOADING_PHRASES))
+    fx = get_a3500().copy()
+    fx["Date"] = pd.to_datetime(fx["Date"], errors="coerce").dt.normalize()
+    fx["FX"] = pd.to_numeric(fx["FX"], errors="coerce")
+    fx = (
+        fx.dropna(subset=["Date", "FX"])
+        .drop_duplicates(subset=["Date"])
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
 
-    with st.spinner("Cargando datos..."):
-        fx = get_a3500().copy()
-        fx["Date"] = pd.to_datetime(fx["Date"], errors="coerce").dt.normalize()
-        fx["FX"] = pd.to_numeric(fx["FX"], errors="coerce")
-        fx = (
-            fx.dropna(subset=["Date", "FX"])
-            .drop_duplicates(subset=["Date"])
-            .sort_values("Date")
-            .reset_index(drop=True)
-        )
+    rem = get_rem_last()
+    ipc = get_ipc_bcra()
 
-        rem = get_rem_last()
-        ipc = get_ipc_bcra()
+    bands_2025 = build_bands_2025("2025-04-14", "2025-12-31", 1000.0, 1400.0)
+    bands_2026 = build_bands_2026(bands_2025, rem, ipc)
 
-        bands_2025 = build_bands_2025("2025-04-14", "2025-12-31", 1000.0, 1400.0)
-        bands_2026 = build_bands_2026(bands_2025, rem, ipc)
+    bands = (
+        pd.concat([bands_2025, bands_2026], ignore_index=True)
+        .dropna(subset=["Date", "lower", "upper"])
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+    bands["Date"] = pd.to_datetime(bands["Date"], errors="coerce").dt.normalize()
+    bands = bands.dropna(subset=["Date", "lower", "upper"])
 
-        bands = (
-            pd.concat([bands_2025, bands_2026], ignore_index=True)
-            .dropna(subset=["Date", "lower", "upper"])
-            .sort_values("Date")
-            .reset_index(drop=True)
-        )
-        bands["Date"] = pd.to_datetime(bands["Date"], errors="coerce").dt.normalize()
-        bands = bands.dropna(subset=["Date", "lower", "upper"])
+    # -------------------------
+    # CCL proxy (FAST) desde services — igual que Home
+    # -------------------------
+    ccl_df = get_ccl_ypf_df_fast(period="2y", prefer_adj=False)
 
-        # -------------------------
-        # CCL desde services (YPF ARS / YPF USD)
-        # -------------------------
-        s_ars = get_ypf_ars_history(start="2000-01-01", prefer_adj=False)
-        s_usd = get_ypf_usd_history(start="1993-01-01", prefer_adj=False)
-
-        tmp_ccl = pd.concat([s_ars, s_usd], axis=1, join="inner").dropna()
-        tmp_ccl["CCL"] = tmp_ccl["YPF_ARS"] / tmp_ccl["YPF_USD"]
-        tmp_ccl = tmp_ccl.replace([np.inf, -np.inf], np.nan).dropna()
-
-        ccl = tmp_ccl.reset_index().rename(columns={"index": "Date"}).copy()
-        ccl["Date"] = pd.to_datetime(ccl["Date"], errors="coerce").dt.normalize()
-        ccl = ccl.dropna(subset=["Date", "CCL"]).sort_values("Date").reset_index(drop=True)
-
-    fact.empty()
+    ccl = ccl_df.rename(columns={"value": "CCL"}).copy()
+    ccl["Date"] = pd.to_datetime(ccl["Date"], errors="coerce").dt.normalize()
+    ccl["CCL"] = pd.to_numeric(ccl["CCL"], errors="coerce")
+    ccl = ccl.dropna(subset=["Date", "CCL"]).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
     # =========================
     # Helpers
@@ -588,8 +575,8 @@ def render_macro_fx(go_to):
     # =========================================================
     st.divider()
 
-    with st.spinner("Cargando ITCRM..."):
-        tcr_long = get_itcrm_excel_long()
+
+    tcr_long = get_itcrm_excel_long()
 
     if tcr_long is None or tcr_long.empty:
         st.warning("Sin datos de ITCRM.")
@@ -1065,11 +1052,15 @@ def render_macro_fx(go_to):
 
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
-    # Export: agregamos YPF_ARS/YPF_USD asof para que sea útil en finanzas también
+    # Export
     export = df_plot[["Date", "Oficial", "CCL", "Brecha"]].copy()
+
+    # Si el DF de CCL trae también YPF_ARS/YPF_USD, los agregamos; si no, seguimos sin eso.
     if ccl is not None and not ccl.empty:
-        ccl_cols = ccl[["Date", "YPF_ARS", "YPF_USD"]].dropna().sort_values("Date").reset_index(drop=True)
-        export = pd.merge_asof(export.sort_values("Date"), ccl_cols, on="Date", direction="backward")
+        extra_cols = [c for c in ["YPF_ARS", "YPF_USD"] if c in ccl.columns]
+        if extra_cols:
+            ccl_cols = ccl[["Date"] + extra_cols].dropna().sort_values("Date").reset_index(drop=True)
+            export = pd.merge_asof(export.sort_values("Date"), ccl_cols, on="Date", direction="backward")
 
     export = export.rename(
         columns={
