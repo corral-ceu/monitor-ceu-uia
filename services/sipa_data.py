@@ -1,19 +1,83 @@
 import re
 import hashlib
 from io import BytesIO
+from datetime import date
 
 import pandas as pd
 import requests
 import streamlit as st
 
-# ============================================================
-# Fuente
-# ============================================================
-SIPA_XLSX_URL = "https://www.argentina.gob.ar/sites/default/files/trabajoregistrado_2510_estadisticas.xlsx"
 
 # ============================================================
-# Helpers de fecha
+# Fuente (en vez de hardcodear el .xlsx del mes)
 # ============================================================
+SIPA_LANDING_PAGE = (
+    "https://www.argentina.gob.ar/trabajo/estadisticas/"
+    "situacion-y-evolucion-del-trabajo-registrado"
+)
+
+# matchea URLs como:
+# https://www.argentina.gob.ar/sites/default/files/trabajoregistrado_2511_estadisticas.xlsx
+_SIPA_XLSX_RE = re.compile(
+    r"https?://www\.argentina\.gob\.ar/sites/default/files/"
+    r"trabajoregistrado_(\d{4})_estadisticas\.xlsx",
+    re.IGNORECASE,
+)
+
+
+@st.cache_data(ttl=24 * 60 * 60, show_spinner=False)  # resolver como máx 1 vez/día
+def _resolve_latest_sipa_xlsx_url() -> str:
+    """
+    Busca en la página oficial el link del XLSX vigente y devuelve el más nuevo.
+    Fallback: si no encuentra nada, prueba por patrón hacia atrás.
+    """
+    # 1) Intento principal: scrape de la landing
+    try:
+        r = requests.get(SIPA_LANDING_PAGE, timeout=30)
+        r.raise_for_status()
+        html = r.text
+
+        matches = list(_SIPA_XLSX_RE.finditer(html))
+        if matches:
+            # elegir el de mayor YYMM
+            best = max(matches, key=lambda m: int(m.group(1)))
+            return best.group(0)
+    except Exception:
+        pass
+
+    # 2) Fallback robusto: probar por patrón (últimos 24 meses)
+    #    (útil si cambian el HTML o el botón no aparece por algún motivo)
+    def iter_yymm(back_months: int = 24):
+        y = date.today().year
+        m = date.today().month
+        for _ in range(back_months):
+            yield f"{y % 100:02d}{m:02d}"
+            m -= 1
+            if m == 0:
+                m = 12
+                y -= 1
+
+    for yymm in iter_yymm(24):
+        url = (
+            "https://www.argentina.gob.ar/sites/default/files/"
+            f"trabajoregistrado_{yymm}_estadisticas.xlsx"
+        )
+        try:
+            # HEAD a veces falla en algunos servidores; si falla, caemos a GET mínimo
+            h = requests.head(url, allow_redirects=True, timeout=15)
+            if h.status_code == 200:
+                return h.url  # por si redirige
+        except Exception:
+            pass
+
+        try:
+            g = requests.get(url, stream=True, timeout=20)
+            if g.status_code == 200:
+                return g.url
+        except Exception:
+            pass
+
+    raise RuntimeError("No se pudo resolver el último link del XLSX de SIPA.")
 def _parse_mes(x):
     if pd.isna(x):
         return pd.NaT
@@ -150,7 +214,12 @@ def _extraer_subsectores_industria(df_raw):
 # ============================================================
 @st.cache_data(ttl=12 * 60 * 60, show_spinner=False)  # baja el XLSX como máx cada 12h
 def _download_sipa_bytes() -> bytes:
-    r = requests.get(SIPA_XLSX_URL, timeout=60)
+    url = _resolve_latest_sipa_xlsx_url()
+
+    # opcional: mostrar qué link se está usando (útil para debug)
+    # st.caption(f"Descargando SIPA desde: {url}")
+
+    r = requests.get(url, timeout=60)
     r.raise_for_status()
     return r.content
 
