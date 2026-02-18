@@ -113,7 +113,7 @@ def render_main_home(go_to):
     st.markdown("<div class='home-cards'>", unsafe_allow_html=True)
 
     sections = [
-        ("🚢 Comercio Exterior", None),
+        ("🚢 Comercio Exterior", "comex"),
         ("📈 Actividad Económica", "macro_pbi_emae"),
         ("🚀 Datos Adelantados", None),
         ("📊 Macroeconomía", "macro_home"),
