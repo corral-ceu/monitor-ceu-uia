@@ -143,6 +143,11 @@ elif sec == "macro_pbi_emae":
         go_to("home")
     render_macro_pbi_emae(go_to)
 
+elif sec == "comex":
+    if st.button("← Volver a secciones"):
+        go_to("home")
+    render_comex(go_to)
+
 else:
     st.warning("Sección desconocida. Volviendo al inicio.")
     go_to("home")
