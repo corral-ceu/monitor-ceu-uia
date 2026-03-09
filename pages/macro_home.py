@@ -458,46 +458,100 @@ NEWS_FEEDS = [
 ]
 
 NEWS_WEIGHTS = {
-    "bcra": 4,
+
+    # =========================
+    # Política monetaria / BCRA
+    # =========================
+    "bcra": 8,
+    "monetaria": 6,
+    "liquidez": 6,
+    "tasa": 8,
+    "tasas": 8,
+    "adelantos": 6,
+    "leliqs": 8,
+    "pases": 6,
+    "emisión": 8,
+    "emision": 8,
+    "base monetaria": 10,
+
+    # =========================
+    # Inflación / actividad
+    # =========================
     "indec": 10,
-    "inflación": 4,
-    "inflacion": 4,
-    "ipc": 4,
-    "ipim": 3,
-    "emae": 4,
-    "pbi": 4,
-    "fmi": 4,
-    "deuda": 5,
-    "empleo": 5,
-    "salarios": 5,
-    "china": 10,
-    "licitación": 3,
-    "licitacion": 3,
-    "bono": 5,
-    "bonos": 5,
-    "riesgo país": 10,
-    "riesgo pais": 10,
-    "reservas": 3,
-    "dólar": 3,
-    "dolar": 3,
-    "monetaria": 3,
-    "cambiaria": 2,
-    "fiscal": 2,
+    "inflación": 8,
+    "inflacion": 8,
+    "ipc": 8,
+    "ipim": 6,
+    "emae": 8,
+    "pbi": 8,
+    "actividad": 6,
+    "recesión": 6,
+    "recesion": 6,
+
+    # =========================
+    # Sector externo / tipo de cambio
+    # =========================
+    "dólar": 8,
+    "dolar": 8,
+    "ccl": 10,
+    "mep": 10,
+    "brecha": 10,
+    "reservas": 8,
+    "devaluación": 10,
+    "devaluacion": 10,
+    "balanza": 6,
+    "déficit": 6,
+    "superávit": 6,
+    "superavit": 6,
+    "importaciones": 6,
+    "exportaciones": 6,
+
+    # =========================
+    # Finanzas / mercado
+    # =========================
+    "bono": 10,
+    "bonos": 10,
+    "licitación": 8,
+    "licitacion": 8,
+    "tesoro": 8,
+    "canje": 8,
+    "rollover": 8,
+    "riesgo país": 12,
+    "riesgo pais": 12,
+    "spread": 8,
+    "curva": 6,
     "merval": 10,
-    "recaudación": 2,
-    "recaudacion": 2,
-    "actividad": 5,
-    "industria": 20,
-    "importaciones": 10,
-    "exportaciones": 10,
-    "caputo": 10,
-    "milei": 10,
-    "quirno": 10,
-    "uia": 50,
-    "ministerio": 1,
-    "economía": 1,
-    "economia": 1,
-    "gobierno": 1,
+    "acciones": 8,
+    "mercados": 6,
+    "volatilidad": 8,
+    "default": 10,
+    "deuda": 8,
+
+    # =========================
+    # Internacional relevante
+    # =========================
+    "fmi": 10,
+    "china": 8,
+    "brasil": 6,
+    "estados unidos": 6,
+    "fed": 8,
+    "tasa fed": 10,
+
+    # =========================
+    # Política económica
+    # =========================
+    "caputo": 6,
+    "milei": 6,
+    "quirno": 6,
+    "ministerio": 2,
+    "economía": 2,
+    "economia": 2,
+    "gobierno": 2,
+    "uia": 15,
+
+    # =========================
+    # NEGATIVOS (SIN TOCAR)
+    # =========================
     "supermercado": -4,
     "descuentos": -3,
     "verano": -3,
@@ -515,6 +569,7 @@ NEWS_WEIGHTS = {
     "gastronomia": -3,
     "restaurante": -3,
 }
+
 
 def _news_score_title(title: str) -> int:
     t = str(title).lower()

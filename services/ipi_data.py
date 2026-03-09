@@ -8,7 +8,7 @@ import streamlit as st
 @st.cache_data(ttl=3600)
 def cargar_ipi_excel():
     """Descarga y lee el Excel del IPI Manufacturero (INDEC) .xls"""
-    url = "https://www.indec.gob.ar/ftp/cuadros/economia/sh_ipi_manufacturero_2025.xls"
+    url = "https://www.indec.gob.ar/ftp/cuadros/economia/sh_ipi_manufacturero_2026.xls"
 
     headers = {
         "User-Agent": "Mozilla/5.0",
