@@ -408,12 +408,10 @@ def _inject_css_fx():
           }
 
           .ipi-title {
-            font-family: -apple-system, "Source Sans Pro", sans-serif;
+            font-family:"Source Sans", sans-serif;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 22px;
             color: #1e3a5f;
-            text-transform: uppercase;
-            letter-spacing: .4px;
             line-height: 1.35;
             margin-bottom: 14px;
             white-space: nowrap;
@@ -446,11 +444,9 @@ def _inject_css_fx():
           }
 
           .ipi-chip-label {
-            font-family: -apple-system, "Source Sans Pro", sans-serif;
-            font-size: 15px;
+            font-family:"Source Sans", sans-serif;
+            font-size: 16px;
             font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: .5px;
             color: #7a90a8;
           }
 
@@ -464,14 +460,14 @@ def _inject_css_fx():
           .arrow-neu { color: #64748b; }
 
           .ipi-chip-val {
-            font-family: -apple-system, "Source Sans Pro", sans-serif;
-            font-size: 22px;
+            font-family:"Source Sans", sans-serif;
+            font-size: 20px;
             font-weight: 700;
             line-height: 1;
           }
-          .val-pos { color: #16a34a; }
-          .val-neg { color: #e11d48; }
-          .val-neu { color: #64748b; }
+          .val-pos { color: #16a34a !important; }
+          .val-neg { color: #e11d48 !important; }
+          .val-neu { color: #64748b !important; }
 
           /* ── Modal KPIs: mismo chip format que las cards ── */
           .ipi-modal-chips {
@@ -493,7 +489,7 @@ def _inject_css_fx():
             justify-content: space-between;
           }
           .ipi-modal-chip-label {
-            font-family: -apple-system, "Source Sans Pro", sans-serif;
+            font-family:"Source Sans", sans-serif;
             font-size: 12px;
             font-weight: 700;
             text-transform: uppercase;
@@ -501,7 +497,7 @@ def _inject_css_fx():
             color: #7a90a8;
           }
           .ipi-modal-chip-val {
-            font-family: -apple-system, "Source Sans Pro", sans-serif;
+            font-family:"Source Sans", sans-serif;
             font-size: 28px;
             font-weight: 700;
             line-height: 1;
