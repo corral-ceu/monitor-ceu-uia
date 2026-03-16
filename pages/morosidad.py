@@ -93,7 +93,7 @@ CSS = """
     border-left: 5px solid #1B2D6B;
     border-radius: 0 12px 12px 0;
     padding: 16px 20px;
-    margin-bottom: 12px;
+    margin-bottom: 4px;
     display: flex;
     align-items: center;
     gap: 24px;
@@ -126,7 +126,7 @@ CSS = """
     border-radius: 22px;
     padding: 14px 16px 22px 16px;
     box-shadow: 0 10px 18px rgba(15,55,100,0.06);
-    margin-top: 4px;
+    margin-top: 0px;
   }
   .sel-label {
     font-size: 11px; font-weight: 800; text-transform: uppercase;
@@ -245,9 +245,6 @@ def _fig_barras(nombres, valores, sufijo, titulo, bold_label=None):
 def render_morosidad(go_to):
 
     st.markdown(CSS, unsafe_allow_html=True)
-
-    if st.button("← Volver"):
-        go_to("home")
 
     try:
         df_ext, df_ind = load_mora()
