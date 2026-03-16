@@ -363,7 +363,7 @@ def render_main_home(go_to):
     r1 = st.columns(3, gap="large")
     r2 = st.columns(3, gap="large")
     r3 = st.columns(3, gap="large")   # ← nueva fila
-    cols = r1 + r2
+    cols = r1 + r2 + r3
 
     for col, (label, target) in zip(cols, sections):
         with col:
