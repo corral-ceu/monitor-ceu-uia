@@ -357,10 +357,12 @@ def render_main_home(go_to):
         ("📊 Macroeconomía", "macro_home"),
         ("💼 Empleo Privado", "empleo"),
         ("🚢 Comercio Exterior", "comex"),
+        ("⚠️ Morosidad", "morosidad"),
     ]
 
     r1 = st.columns(3, gap="large")
     r2 = st.columns(3, gap="large")
+    r3 = st.columns(3, gap="large")   # ← nueva fila
     cols = r1 + r2
 
     for col, (label, target) in zip(cols, sections):
