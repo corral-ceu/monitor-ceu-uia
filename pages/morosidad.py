@@ -214,7 +214,7 @@ def _fig_barras(nombres, valores, sufijo, titulo, bold_label=None):
     fig = go.Figure(go.Bar(
         x=vals, y=y_labels, orientation="h",
         marker_color=colores,
-        text=[f"{v:.1f}{sufijo}".replace(".", ",") for v in vals],
+        text=[fmt_millones(v) if sufijo == "M" else f"{v:.1f}%".replace(".", ",") for v in vals],
         textposition="outside",
         textfont=dict(size=13, color="#14324f"),
         cliponaxis=False,
