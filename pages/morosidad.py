@@ -83,6 +83,14 @@ def fmt_pct(x, dec=1):
     except Exception:
         return "—"
 
+def fmt_millones(x):
+    try:
+        v = float(x)
+        v = int(round(v))  # sin decimales
+        return f"{v:,}".replace(",", ".") + " M"
+    except Exception:
+        return "—"
+
 
 # ============================================================
 # CSS
