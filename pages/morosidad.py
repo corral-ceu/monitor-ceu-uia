@@ -362,7 +362,7 @@ def _fig_lineas(df_series, sufijo, titulo):
             bgcolor="rgba(255,255,255,0.7)",
             bordercolor="rgba(15,55,100,0.10)",
             borderwidth=1,
-        )
+        ),
         hovermode="x unified",
         dragmode=False,
     )
