@@ -329,7 +329,7 @@ def _fig_lineas(df_series, sufijo, titulo):
             line=dict(color=color, width=3 if es_tot else 1.8,
                       dash="solid" if es_tot else "dot"),
             marker=dict(size=6 if es_tot else 4, color=color),
-            hovertemplate=f"<b>{serie}</b><br>%{{x}}<br>{hover_fmt}<extra></extra>",
+            hovertemplate=f"<b>{serie}</b><br>{hover_fmt}<extra></extra>",
         ))
 
     tick_suf = "%" if sufijo == "%" else ""
@@ -353,11 +353,16 @@ def _fig_lineas(df_series, sufijo, titulo):
         paper_bgcolor="white",
         height=460,
         legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
             font=dict(size=11, color="#334155"),
-            bgcolor="rgba(255,255,255,0.8)",
+            bgcolor="rgba(255,255,255,0.7)",
             bordercolor="rgba(15,55,100,0.10)",
             borderwidth=1,
-        ),
+        )
         hovermode="x unified",
         dragmode=False,
     )
