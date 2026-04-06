@@ -35,6 +35,13 @@ INDU_LOADING_PHRASES = [
 def render_macro_fx(go_to):
 
     # =========================
+    # Helpers de fecha
+    # =========================
+    def _fix_date(s):
+        s = pd.to_datetime(s, errors="coerce", utc=True)
+        return s.dt.tz_convert(None).dt.normalize()
+
+    # =========================
     # Botón volver
     # =========================
     if st.button("← Volver"):
@@ -233,7 +240,7 @@ def render_macro_fx(go_to):
     # Load data
     # =========================
     fx = get_a3500().copy()
-    fx["Date"] = pd.to_datetime(fx["Date"], errors="coerce").dt.normalize()
+    fx["Date"] = _fix_date(fx["Date"])
     fx["FX"] = pd.to_numeric(fx["FX"], errors="coerce")
     fx = (
         fx.dropna(subset=["Date", "FX"])
@@ -254,7 +261,7 @@ def render_macro_fx(go_to):
         .sort_values("Date")
         .reset_index(drop=True)
     )
-    bands["Date"] = pd.to_datetime(bands["Date"], errors="coerce").dt.normalize()
+    bands["Date"] = _fix_date(bands["Date"])
     bands = bands.dropna(subset=["Date", "lower", "upper"])
 
     # -------------------------
@@ -263,7 +270,7 @@ def render_macro_fx(go_to):
     ccl_df = get_ccl_ypf_df_fast(period="2y", prefer_adj=False)
 
     ccl = ccl_df.rename(columns={"value": "CCL"}).copy()
-    ccl["Date"] = pd.to_datetime(ccl["Date"], errors="coerce").dt.normalize()
+    ccl["Date"] = _fix_date(ccl["Date"])
     ccl["CCL"] = pd.to_numeric(ccl["CCL"], errors="coerce")
     ccl = ccl.dropna(subset=["Date", "CCL"]).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
@@ -290,12 +297,12 @@ def render_macro_fx(go_to):
     brecha_daily = pd.DataFrame(columns=["Date", "Oficial", "CCL", "Brecha"])
     if (fx is not None and not fx.empty) and (ccl is not None and not ccl.empty):
         ofi = fx[["Date", "FX"]].rename(columns={"FX": "Oficial"}).copy()
-        ofi["Date"] = pd.to_datetime(ofi["Date"], errors="coerce").dt.normalize()
+        ofi["Date"] = _fix_date(ofi["Date"])
         ofi["Oficial"] = pd.to_numeric(ofi["Oficial"], errors="coerce")
         ofi = ofi.dropna(subset=["Date", "Oficial"]).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
         ccl_s = ccl[["Date", "CCL"]].copy()
-        ccl_s["Date"] = pd.to_datetime(ccl_s["Date"], errors="coerce").dt.normalize()
+        ccl_s["Date"] = _fix_date(ccl_s["Date"])
         ccl_s["CCL"] = pd.to_numeric(ccl_s["CCL"], errors="coerce")
         ccl_s = ccl_s.dropna(subset=["Date", "CCL"]).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
 
@@ -582,7 +589,7 @@ def render_macro_fx(go_to):
         st.warning("Sin datos de ITCRM.")
     else:
         tcr_long = tcr_long.copy()
-        tcr_long["Date"] = pd.to_datetime(tcr_long["Date"], errors="coerce").dt.normalize()
+        tcr_long["Date"] = _fix_date(tcr_long["Date"])
         tcr_long["Value"] = pd.to_numeric(tcr_long["Value"], errors="coerce")
         tcr_long["Serie"] = tcr_long["Serie"].astype(str)
         tcr_long = tcr_long.dropna(subset=["Date", "Serie", "Value"]).sort_values("Date")
@@ -778,6 +785,7 @@ def render_macro_fx(go_to):
             )
 
             df2 = cal2.merge(wide, on="Date", how="left").sort_values("Date").reset_index(drop=True)
+            df2["Date"] = _fix_date(df2["Date"])
 
             # ffill respetando último dato por serie
             for s in series_all:
@@ -788,8 +796,12 @@ def render_macro_fx(go_to):
 
             # ---- brecha asof sobre fechas TCRM (último inmediato)
             if brecha_daily is not None and not brecha_daily.empty:
-                b = brecha_daily[["Date", "Brecha"]].dropna().sort_values("Date").reset_index(drop=True)
-                df2 = pd.merge_asof(df2.sort_values("Date"), b, on="Date", direction="backward")
+                b = brecha_daily[["Date", "Brecha"]].copy()
+                b["Date"] = _fix_date(b["Date"])
+                b = b.dropna(subset=["Date", "Brecha"]).sort_values("Date").reset_index(drop=True)
+
+                df2 = df2.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+                df2 = pd.merge_asof(df2, b, on="Date", direction="backward")
             else:
                 df2["Brecha"] = np.nan
 
@@ -1054,13 +1066,17 @@ def render_macro_fx(go_to):
 
     # Export
     export = df_plot[["Date", "Oficial", "CCL", "Brecha"]].copy()
+    export["Date"] = _fix_date(export["Date"])
+    export = export.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 
     # Si el DF de CCL trae también YPF_ARS/YPF_USD, los agregamos; si no, seguimos sin eso.
     if ccl is not None and not ccl.empty:
         extra_cols = [c for c in ["YPF_ARS", "YPF_USD"] if c in ccl.columns]
         if extra_cols:
-            ccl_cols = ccl[["Date"] + extra_cols].dropna().sort_values("Date").reset_index(drop=True)
-            export = pd.merge_asof(export.sort_values("Date"), ccl_cols, on="Date", direction="backward")
+            ccl_cols = ccl[["Date"] + extra_cols].copy()
+            ccl_cols["Date"] = _fix_date(ccl_cols["Date"])
+            ccl_cols = ccl_cols.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+            export = pd.merge_asof(export, ccl_cols, on="Date", direction="backward")
 
     export = export.rename(
         columns={
