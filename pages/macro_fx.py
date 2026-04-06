@@ -297,18 +297,38 @@ def render_macro_fx(go_to):
     brecha_daily = pd.DataFrame(columns=["Date", "Oficial", "CCL", "Brecha"])
     if (fx is not None and not fx.empty) and (ccl is not None and not ccl.empty):
         ofi = fx[["Date", "FX"]].rename(columns={"FX": "Oficial"}).copy()
-        ofi["Date"] = _fix_date(ofi["Date"])
+        ofi["Date"] = pd.to_datetime(ofi["Date"], errors="coerce")
         ofi["Oficial"] = pd.to_numeric(ofi["Oficial"], errors="coerce")
-        ofi = ofi.dropna(subset=["Date", "Oficial"]).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
-
+        ofi = (
+            ofi.dropna(subset=["Date", "Oficial"])
+               .drop_duplicates(subset=["Date"])
+               .sort_values("Date")
+               .reset_index(drop=True)
+        )
+    
         ccl_s = ccl[["Date", "CCL"]].copy()
-        ccl_s["Date"] = _fix_date(ccl_s["Date"])
+        ccl_s["Date"] = pd.to_datetime(ccl_s["Date"], errors="coerce")
         ccl_s["CCL"] = pd.to_numeric(ccl_s["CCL"], errors="coerce")
-        ccl_s = ccl_s.dropna(subset=["Date", "CCL"]).drop_duplicates("Date").sort_values("Date").reset_index(drop=True)
-
-        tmpb = pd.merge_asof(ofi, ccl_s, on="Date", direction="backward")
+        ccl_s = (
+            ccl_s.dropna(subset=["Date", "CCL"])
+                 .drop_duplicates(subset=["Date"])
+                 .sort_values("Date")
+                 .reset_index(drop=True)
+        )
+    
+        # key numérica robusta para merge_asof
+        ofi["Date_key"] = ofi["Date"].astype("int64")
+        ccl_s["Date_key"] = ccl_s["Date"].astype("int64")
+    
+        tmpb = pd.merge_asof(
+            ofi.sort_values("Date_key"),
+            ccl_s[["Date_key", "CCL"]].sort_values("Date_key"),
+            on="Date_key",
+            direction="backward",
+        )
+    
         tmpb["Brecha"] = (tmpb["CCL"] / tmpb["Oficial"] - 1) * 100
-        brecha_daily = tmpb.dropna(subset=["Brecha"]).reset_index(drop=True)
+        brecha_daily = tmpb[["Date", "Oficial", "CCL", "Brecha"]].dropna(subset=["Brecha"]).reset_index(drop=True)
 
     # =========================
     # Header dinámico según selección actual
@@ -801,7 +821,21 @@ def render_macro_fx(go_to):
                 b = b.dropna(subset=["Date", "Brecha"]).sort_values("Date").reset_index(drop=True)
 
                 df2 = df2.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
-                df2 = pd.merge_asof(df2, b, on="Date", direction="backward")
+                df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce")
+                b["Date"] = pd.to_datetime(b["Date"], errors="coerce")
+                
+                df2 = df2.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+                b = b.dropna(subset=["Date", "Brecha"]).sort_values("Date").reset_index(drop=True)
+                
+                df2["Date_key"] = df2["Date"].astype("int64")
+                b["Date_key"] = b["Date"].astype("int64")
+                
+                df2 = pd.merge_asof(
+                    df2.sort_values("Date_key"),
+                    b[["Date_key", "Brecha"]].sort_values("Date_key"),
+                    on="Date_key",
+                    direction="backward",
+                )
             else:
                 df2["Brecha"] = np.nan
 
@@ -1076,7 +1110,21 @@ def render_macro_fx(go_to):
             ccl_cols = ccl[["Date"] + extra_cols].copy()
             ccl_cols["Date"] = _fix_date(ccl_cols["Date"])
             ccl_cols = ccl_cols.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
-            export = pd.merge_asof(export, ccl_cols, on="Date", direction="backward")
+            export["Date"] = pd.to_datetime(export["Date"], errors="coerce")
+            ccl_cols["Date"] = pd.to_datetime(ccl_cols["Date"], errors="coerce")
+            
+            export = export.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+            ccl_cols = ccl_cols.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+            
+            export["Date_key"] = export["Date"].astype("int64")
+            ccl_cols["Date_key"] = ccl_cols["Date"].astype("int64")
+            
+            export = pd.merge_asof(
+                export.sort_values("Date_key"),
+                ccl_cols.drop(columns=["Date"]).sort_values("Date_key"),
+                on="Date_key",
+                direction="backward",
+            ).drop(columns=["Date_key"])
 
     export = export.rename(
         columns={
