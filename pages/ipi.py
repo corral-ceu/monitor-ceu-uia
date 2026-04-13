@@ -913,6 +913,7 @@ def render_ipi(go_to):
 
         MODE_LABELS = {
             "acum": acc_label,
+            "acum_cerrado": "Variación acumulada año cerrado",
             "anual": "Variación anual",
             "se": "Variación serie sin estacionalidad",
         }
@@ -1027,6 +1028,50 @@ def render_ipi(go_to):
 
             rama_label = f" — {rama_sel}" if rama_sel != "Total" else ""
             subtitle = f"Comparación acumulada ene–{last_month_label} (promedio) · A={year_a} / B={year_b}{rama_label}"
+
+        elif mode_key == "acum_cerrado":
+            years_closed = []
+            if not df_o_plot.empty:
+                month_counts = (
+                    df_o_plot.assign(Y=df_o_plot["Date"].dt.year, M=df_o_plot["Date"].dt.month)
+                    .groupby(["Sector", "Y"])["M"]
+                    .nunique()
+                    .reset_index()
+                )
+                if not month_counts.empty:
+                    # Año cerrado = 12 meses completos para todas las series visibles
+                    min_months_by_year = month_counts.groupby("Y")["M"].min()
+                    years_closed = sorted([int(y) for y, m in min_months_by_year.items() if int(m) == 12], reverse=True)
+
+            if not years_closed:
+                st.warning("No hay años cerrados disponibles para comparar (12 meses completos).")
+                return
+
+            if "ipi_sec_year_closed_a" not in st.session_state:
+                st.session_state["ipi_sec_year_closed_a"] = years_closed[0]
+            if "ipi_sec_year_closed_b" not in st.session_state:
+                st.session_state["ipi_sec_year_closed_b"] = years_closed[1] if len(years_closed) > 1 else years_closed[0]
+
+            with colA:
+                st.markdown("<div class='fx-panel-title'>Período Final</div>", unsafe_allow_html=True)
+                st.selectbox("", years_closed, key="ipi_sec_year_closed_a", label_visibility="collapsed")
+
+            with colB:
+                st.markdown("<div class='fx-panel-title'>Período Inicial</div>", unsafe_allow_html=True)
+                st.selectbox("", years_closed, key="ipi_sec_year_closed_b", label_visibility="collapsed")
+
+            year_a = int(st.session_state.get("ipi_sec_year_closed_a"))
+            year_b = int(st.session_state.get("ipi_sec_year_closed_b"))
+
+            def _full_year_avg_by_sector_orig(year: int) -> pd.Series:
+                t = df_o_plot[df_o_plot["Date"].dt.year == year].copy()
+                return t.groupby("Sector")["Value"].mean()
+
+            A = _full_year_avg_by_sector_orig(year_a)
+            B = _full_year_avg_by_sector_orig(year_b)
+
+            rama_label = f" — {rama_sel}" if rama_sel != "Total" else ""
+            subtitle = f"Comparación acumulada año cerrado (promedio anual) · A={year_a} / B={year_b}{rama_label}"
 
         elif mode_key == "anual":
             month_num = last_month_num
