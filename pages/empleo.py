@@ -51,7 +51,44 @@ def _arrow_cls(v):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return ("", "")
     return ("▲", "fx-up") if v >= 0 else ("▼", "fx-down")
+def _calc_yoy_by_date(fechas: pd.Series, serie: pd.Series) -> float:
+    df = pd.DataFrame({
+        "fecha": pd.to_datetime(fechas),
+        "valor": pd.to_numeric(serie, errors="coerce")
+    }).dropna().sort_values("fecha")
 
+    if df.empty:
+        return np.nan
+
+    fecha_actual = df["fecha"].iloc[-1]
+    fecha_prev   = fecha_actual - pd.DateOffset(years=1)
+
+    prev = df.loc[df["fecha"] == fecha_prev, "valor"]
+    if prev.empty or prev.iloc[0] == 0:
+        return np.nan
+
+    val_actual = df["valor"].iloc[-1]
+    return ((val_actual / prev.iloc[0]) - 1) * 100
+
+
+def _calc_yoy_diff_by_date(fechas: pd.Series, serie: pd.Series, scale: int = 1) -> float:
+    df = pd.DataFrame({
+        "fecha": pd.to_datetime(fechas),
+        "valor": pd.to_numeric(serie, errors="coerce")
+    }).dropna().sort_values("fecha")
+
+    if df.empty:
+        return np.nan
+
+    fecha_actual = df["fecha"].iloc[-1]
+    fecha_prev   = fecha_actual - pd.DateOffset(years=1)
+
+    prev = df.loc[df["fecha"] == fecha_prev, "valor"]
+    if prev.empty:
+        return np.nan
+
+    val_actual = df["valor"].iloc[-1]
+    return (val_actual - prev.iloc[0]) * scale
 
 # ============================================================
 # CSS
@@ -534,7 +571,13 @@ def render_empleo(go_to):
     target_date = pd.Timestamp("2023-08-01")
     ult_f       = df_total["fecha"].iloc[-1]
     mes_txt     = obtener_nombre_mes(ult_f)
-    mes_label   = ult_f.strftime("%b-%y").lower() if hasattr(ult_f, "strftime") else str(ult_f)[:7]
+    MESES_ES = {
+    1: "ene", 2: "feb", 3: "mar", 4: "abr",
+    5: "may", 6: "jun", 7: "jul", 8: "ago",
+    9: "sep", 10: "oct", 11: "nov", 12: "dic"
+}
+
+    mes_label = f"{MESES_ES[ult_f.month]}-{str(ult_f.year)[-2:]}"
 
     s_orig = df_total["orig"]
     s_sa   = df_total["sa"]
@@ -547,8 +590,8 @@ def render_empleo(go_to):
     # ── KPIs totales ──
     m_e  = calc_var(s_sa, 1)
     m_p  = s_sa.diff().iloc[-1] * scale
-    i_e  = calc_var(s_orig, 12)
-    i_p  = s_orig.diff(12).iloc[-1] * scale
+    i_e  = _calc_yoy_by_date(df_total["fecha"], s_orig)
+    i_p  = _calc_yoy_diff_by_date(df_total["fecha"], s_orig, scale=scale)
 
     try:
         val_23  = df_total.loc[df_total["fecha"] == target_date, "sa"].iloc[0]
@@ -603,7 +646,7 @@ def render_empleo(go_to):
         if "industria" in sec.lower():
             ind_data = {"orig": ss_orig, "sa": ss_sa, "name": sec, "tmp": tmp_sec}
 
-        abs_val = ss_sa.iloc[-1] * scale if not ss_sa.empty else np.nan
+        abs_val = ss_orig.iloc[-1] * scale if not ss_orig.empty else np.nan
 
         try:
             v23_sec  = tmp_sec.loc[tmp_sec["fecha"] == target_date, col_s].iloc[0]
@@ -617,15 +660,15 @@ def render_empleo(go_to):
             "abs_val": abs_val,
             "m_p":     ss_sa.diff().iloc[-1] * scale,
             "m_e":     calc_var(ss_sa, 1),
-            "i_p":     ss_orig.diff(12).iloc[-1] * scale,
-            "i_e":     calc_var(ss_orig, 12),
+            "i_p":     _calc_yoy_diff_by_date(tmp_sec["fecha"], ss_orig, scale=scale),
+            "i_e":     _calc_yoy_by_date(tmp_sec["fecha"], ss_orig),
             "v23_p":   delta_23,
             "v23_e":   pct_23,
         })
 
     total_row = {
         "name":    "Total Empleo Privado",
-        "abs_val": s_sa.iloc[-1] * scale,
+        "abs_val": s_orig.iloc[-1] * scale,
         "m_p": m_p,    "m_e": m_e,
         "i_p": i_p,    "i_e": i_e,
         "v23_p": v23_p, "v23_e": v23_pct,
@@ -681,8 +724,8 @@ def render_empleo(go_to):
 
         mi_e = calc_var(isa, 1)
         mi_p = isa.diff().iloc[-1] * scale
-        ii_e = calc_var(iorig, 12)
-        ii_p = iorig.diff(12).iloc[-1] * scale
+        ii_e = _calc_yoy_by_date(tmp2["fecha"], iorig)
+        ii_p = _calc_yoy_diff_by_date(tmp2["fecha"], iorig, scale=scale)
 
         try:
             ival_23  = tmp2.loc[tmp2["fecha"] == target_date, ind_data["name"] + "_sa"].iloc[0]
@@ -726,7 +769,7 @@ def render_empleo(go_to):
 
         sbs_orig = tmp_sub[col_o_s]
         sbs_sa   = tmp_sub[col_s_s]
-        abs_val  = sbs_sa.iloc[-1] * scale if not sbs_sa.empty else np.nan
+        abs_val  = sbs_orig.iloc[-1] * scale if not sbs_orig.empty else np.nan
 
         try:
             v23_sb  = tmp_sub.loc[tmp_sub["fecha"] == target_date, col_s_s].iloc[0]
@@ -740,8 +783,8 @@ def render_empleo(go_to):
             "abs_val": abs_val,
             "m_p":     sbs_sa.diff().iloc[-1] * scale,
             "m_e":     calc_var(sbs_sa, 1),
-            "i_p":     sbs_orig.diff(12).iloc[-1] * scale,
-            "i_e":     calc_var(sbs_orig, 12),
+            "i_p":     _calc_yoy_diff_by_date(tmp_sub["fecha"], sbs_orig, scale=scale),
+            "i_e":     _calc_yoy_by_date(tmp_sub["fecha"], sbs_orig),
             "v23_p":   d23_sb,
             "v23_e":   p23_sb,
         })
@@ -751,7 +794,7 @@ def render_empleo(go_to):
     if ind_data is not None:
         ind_total_rows.append({
             "name":    "Total Industria",
-            "abs_val": ind_data["sa"].iloc[-1] * scale,
+            "abs_val": ind_data["orig"].iloc[-1] * scale,
             "m_p": mi_p, "m_e": mi_e,
             "i_p": ii_p, "i_e": ii_e,
             "v23_p": iv23_p, "v23_e": iv23_pct,
