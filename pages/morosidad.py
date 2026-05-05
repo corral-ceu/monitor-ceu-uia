@@ -49,21 +49,10 @@ def load_mora():
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df[COL_SECTOR] = df[COL_SECTOR].astype(str).str.strip()
     df = df[~df[COL_SECTOR].str.lower().isin(["nan", "none", ""])].copy()
-    # Fecha: quedarse solo con valores AAAAMM válidos
-    df[COL_FECHA] = (
-        df[COL_FECHA]
-        .astype(str)
-        .str.extract(r"(20\d{4})")[0]
-    )
-    
+
+    df[COL_FECHA] = pd.to_numeric(df[COL_FECHA], errors="coerce")
     df = df.dropna(subset=[COL_FECHA]).copy()
     df[COL_FECHA] = df[COL_FECHA].astype(int)
-    
-    # Validar mes 1-12
-    df = df[
-        (df[COL_FECHA] % 100 >= 1) &
-        (df[COL_FECHA] % 100 <= 12)
-    ].copy()
 
     # Último mes → Tab 1 y Tab 2
     ultimo_mes = df[COL_FECHA].max()
