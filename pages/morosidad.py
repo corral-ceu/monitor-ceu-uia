@@ -49,7 +49,13 @@ def load_mora():
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df[COL_SECTOR] = df[COL_SECTOR].astype(str).str.strip()
     df = df[~df[COL_SECTOR].str.lower().isin(["nan", "none", ""])].copy()
-    df[COL_FECHA] = pd.to_numeric(df[COL_FECHA], errors="coerce")
+    df[COL_FECHA] = (
+        pd.to_numeric(df[COL_FECHA], errors="coerce")
+        .astype("Int64")
+        .astype(str)
+        .str[:6]              # 👈 CLAVE: recorta a AAAAMM
+        .astype(int)
+    )
 
     # Último mes → Tab 1 y Tab 2
     ultimo_mes = df[COL_FECHA].max()
