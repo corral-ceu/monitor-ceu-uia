@@ -523,7 +523,13 @@ def render_morosidad(go_to):
         # ══════════════════════════════════════════════════════
         with tab_hist:
 
-            fechas_ord  = sorted(df_hist[COL_FECHA].dropna().unique())
+            fechas_ord = [
+    202402, 202403, 202404, 202405, 202406, 202407,
+    202408, 202409, 202410, 202411, 202412,
+    202501, 202502, 202503, 202504, 202505, 202506,
+    202507, 202508, 202509, 202510, 202511, 202512,
+    202601, 202602
+]
             df_hist_ext = df_hist[(df_hist[COL_ID] < ID_IND_MIN) | (df_hist[COL_ID] > ID_IND_MAX)].copy()
             df_hist_ind = df_hist[(df_hist[COL_ID] >= ID_IND_MIN) & (df_hist[COL_ID] <= ID_IND_MAX)].copy()
 
