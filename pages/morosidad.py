@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 # Config
 # ============================================================
 MORA_PATH       = "assets/mora_por_actividad2.xlsx"
-COL_FECHA       = "fecha"
+COL_FECHA       = "fecha_reg"
 COL_SECTOR      = "Sector_1_dígito"
 COL_ID          = "id"
 COL_NOMBRE      = "Nombre"
